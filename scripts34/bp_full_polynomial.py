@@ -1,9 +1,16 @@
+"""The test round with bayespy for curve fitting with high order polynomials.
+
+Some data is generated and prepared in <PREP>.
+
+A bayespy model is constructed in <MODEL>
+
+New data is generated and tested against the polynomial in <EXAMINE>
+"""
+
 import bayespy as bp
 import numpy as np
 import matplotlib.pyplot as plt
 
-#data generation along two dimensions.
-#TODO for later testing (and future implementation), be able to change the number of dimensions
 
 def gen_indData(size=500):
     #size = size
@@ -50,7 +57,7 @@ def dim_indices(indData):
     return indexList
 
 def pre_beta(indData, indexList, degree):
-    """Multiplies and exponentiates terms in preperation for beta application."""
+    """Multiplies and exponentiates terms in preperation for beta application. This is the full value of the term without the coefficient."""
     x = indData
     n = degree
     
