@@ -1,0 +1,19 @@
+#as of 2015-11-07
+#this is a list of libraries on the python2.7 virtualenv running stuff from the scripts27 directory. 'pip install' all of thise, and you should be good to go.
+
+funcsigs==0.4
+matplotlib==1.4.3
+mock==1.3.0
+nose==1.3.7
+numpy==1.10.0.post2
+pandas==0.17.0
+pbr==1.8.1
+pydot==1.0.2
+pyglet==1.2.4
+pymc==2.3.5
+pymunk==4.0.0
+pyparsing==2.0.3
+python-dateutil==2.4.2
+pytz==2015.6
+scipy==0.16.0
+six==1.10.0
