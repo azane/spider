@@ -1,5 +1,10 @@
 """this is the main pyglet/pymunk relation file,
-        the world/simulation specific stuff will be handled by the various classes of the worlds.py file referenced in pymunk_space"""
+        the world/simulation specific stuff will be handled by the various classes of the worlds.py file referenced in pymunk_space
+        
+        the idea here is that this file should never really have to be changed to render a different world, except to call a different world on one line.
+            but maybe even that should be made passable from the command line.
+        
+        """
 
 import pyglet
 from pyglet.window import key, mouse

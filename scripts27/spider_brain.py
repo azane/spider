@@ -5,7 +5,7 @@ import pylab as pylab
 
 """
 
-remember that one of the main premises is that the series data is not stored perpetually, but rather converted to a (or many) polynomials.
+remember that one of the main premises is that the series data is not stored perpetually, but rather converted to a (or many) predictor functions.
     this allows for a very compact storage of complex interactions. as new information comes in, the models are updated and refined.
     acting on these functions is pheasable...as opposed to an enormous set of points and clusters. like...100*100 vs 100^100. O_o
 
@@ -23,14 +23,13 @@ class SpiderBrain(object):
     def __init__(self, physiology):
         object.__init__(self)
         
-        self.physiology = physiology #a SpiderPhysiology object so the brain can access the muscles.
+        self.physiology = physiology #a SpiderPhysiology object passed in from the world so the brain can access the muscles.
+                                        #FIXME why is this passed in from the world? why can't it be generated here.
         
-        #muscles are considered nodes. #FIXME just combine these in physiology.
+        #muscles are nodes as far as the brain is concerned. #FIXME just combine these in physiology.
         self.allNodes = []
         self.allNodes.extend(self.physiology.muscles)
         self.allNodes.extend(self.physiology.nodes)
-        
-        #the dimensions store information for creating
         
         ##All things set to None are shaped in self.__define_series()
         
@@ -79,14 +78,11 @@ class SpiderBrain(object):
         
         #print str(i) + ", " + str(max(*pDatList))
         
-        #set self.cts as a box array with nans. when the cts is updated, nans will be overwritten as required.
-        #FIXME ensure that this is indexically ordered
-            #i+1 cz i is a zero base index, not a count. shapes are defined as counts.
+        #set self.cts as a box array with nans. when the cts is updated, nans will be overwritten as required.\
         self.cts = numpy.full((i+1, max(*pDatList)), numpy.nan) #this array's memory allotment will remain, but the numbers will shift around for each timestep.
         
         #print self.cts
         
-        #FIXME ensure that this is indexically ordered.
         self.series = numpy.full((self.seriesSize, total), numpy.nan) #set size of series, each coordinate is the flattened version of self.cts without nans.
         #print "total: " + str(total)
         #print "self.series: "
@@ -108,9 +104,6 @@ class SpiderBrain(object):
             n.step(dt)
     def _step_data(self, dt):
         
-        ##TODO create multiple output graphs for each sensor so defined so they can be maximized.
-                #FIXME are multiple graphs needed? or can relationships be extrapolated from one and assigned to others?
-                #       yesh. especially if we relate the data 1 by 1, and only use formulas as needed. for specific sensors.
         
         #check timestep.
         self.dtAgg = self.dtAgg + dt
@@ -120,6 +113,7 @@ class SpiderBrain(object):
         self.dtAgg = 0
         
         #The array modifications in this method shy away from replacing anything alotted in __define_series()
+        #FIXME though i'm not actually sure if numpy.roll() doesn't make a copy of the array... : / it seems fast enough, so maybe whatevs.
         
         sensorList = [] #the list of sensor indices
         
@@ -215,7 +209,7 @@ class SpiderBrain(object):
         
     def series_to_csv(self, dest="foo.csv", columns=[]):
         
-        #TODO change the defaults, and finish this method.
+        #TODO change the defaults, and finish this method. or throw it away.....? probs that.
         
         #FIXME columns needs to select all the columns by default, but it keeps throwing "baddy synax" errors when it's defined apart from an arr-like.
         

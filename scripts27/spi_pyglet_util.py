@@ -1,3 +1,6 @@
+#azane copied the _draw_line and _draw_constraint methods from the pymunk docs.
+#   they weren't in the pip installed file for some reason.
+
 # ----------------------------------------------------------------------------
 # pymunk
 # Copyright (c) 2007-2012 Victor Blomqvist

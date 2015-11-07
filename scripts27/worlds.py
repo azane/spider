@@ -1,7 +1,10 @@
 """This file contains worlds. Each world inherits the pymunk.Space class, and is used as a space in the main.py file of this project.
+
+    TODO The below needs to be updated after the base class is written.
+    
     Each world has three methods, __init__() in which world-wide settings are selected, environment(), in which the non-agential elements are added to the space
         and agents(), in which all agents are added to the space.
-        just for safety, methods not desiring to overwrite are prefixed with 'spi_', for the spider project."""
+        just for namespace safety, methods not trying to overwrite are prefixed with 'spi_', for the spider project."""
 
 import pymunk
 from pymunk import Vec2d
@@ -11,11 +14,14 @@ from spider_physiology import SpiderPhysiology
 from spider_brain import SpiderBrain
 
 
-##FIXME write a base class for worlds...it would need, some form of everything implemented below.
+##TODO write a base class for worlds. It will need direct support for multiple agents, not just one like ConveyorTest. but. ConveyorTest is close.
+##      see main.py for how everything is passed around.
 
 ##FIXME make self.spi_spider = SpiderBrain(), not physiology, the physiology belongs to the brain.
 
 class ConveyorTest(pymunk.Space):
+    
+    
     def __init__(self, spi_keys, spi_wh, spi_ww):
         
         pymunk.Space.__init__(self)
@@ -35,30 +41,9 @@ class ConveyorTest(pymunk.Space):
         self._spi_drawables.extend(self.spi_agents()) #add environment drawables
     
     def spi_timestep(self, dt):
+        #call the brain step function.
+        #FIXME in a multi-agent model, this would have to...iterate all the agents in the world? blerg.
         self.spi_brain.step(dt)
-        
-        """brainstorming
-        
-        here, we should pass dt to a reference object, a list/dict/object of some kind
-        BaseNode (and all its children) will have access to this dt value
-        that won't work, because how will the nodes know when to check the value of dt?
-        
-        is there a way to trigger all the nodes in the world without iterating through each one of them?
-        what if only the nodes that need triggered get added to an iterator?
-        
-        what about a next(iterator) model?
-        
-        but actually, it makes sense for the SpiderBrain.step_data function to handle...well...stepping the data of its nodes.
-        maybe we should rename this function to SpiderBrain.step, and it will call SpiderBrain._step_data and SpiderBrain._step_nodes
-        both of which receive dt and can act however they wish on it.
-        
-        SpiderBrain._step_nodes then, will have access to the physiology, which has access to the nodes.
-        SpiderBrain._step_nodes() will iterate the physiology's nodes and call BaseNode.step(dt) on each.
-        BaseNode.step(dt) will simply pass and do nothing...but that can be overwritten in a child class.
-            during the optimization phase of this program, SpiderBrain._step_nodes() should only iterate a list
-            of nodes that want stepping. i.e. make another reference list in the physiology of only nodes that need stepping.
-        
-        """
     
     def spi_environment(self):
         wh = self.spi_wh
@@ -77,7 +62,7 @@ class ConveyorTest(pymunk.Space):
         self.add(conveyor_base) #add to space for physics sim.
         l.extend([conveyor_base]) #add to list returned for drawing.
         
-        return l#don't make belt.
+        return l #don't make belt.
         
         #conveyor "belt" with friction and mass (for inertia).
         cbHeight = 10

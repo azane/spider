@@ -13,8 +13,8 @@ import math
             This information may be sensory, for the brain of the body to which the node belongs.
             
             And/or, this information may result in events in the world, and can have an effect on other elements.
-            FIXME as of 20151013, i'm not sure of the best way to have nodes interact with the world. so far, i only have a balance node,
-                and that only holds information for use by the spider_brain
+            FIXME as of 20151013, i'm not sure of the best way to have nodes interact with the world. so far, i only have a balance node and a velocity node,
+                but those only hold information for use by the spider_brain
                 maybe have the nodes handle the interactions?
                 or have an interactions module reconcile node information with everything else?
                     then we'll have node info in multiple places...which is unnecessarily redundant.
@@ -56,20 +56,14 @@ class BaseNode(object):
     def step(self, dt):
         pass #unimplemented this does nothing, but it's not considered an error.
 
-#FIXME TODO this node needs some semblance of dt (which would be good for the BaseNode class to have anyway) 
-#               AND the BaseNode class needs to be able to handle kwargs that will be passed as a dictionary
-#               from spider_physiology upon creation. Although, if this kwargs feature was modified to take lists, it would make physiological
-#               mutation much easier to implement.
-
-#TODO part of a flexible, mutateable node model might be to have sigmoidal or gaussian outputs for a randomly generated default.
+#TODO part of a flexible, mutateable node model might be to have sigmoidal or gaussian settings for randomly generated defaults.
 #           then, if the physiology mutates to take advantage of that particular node initialization argument, good!
 #               but, if not, the values are still generated over the correct range.
 class DeltaX(BaseNode):
+    """The goal of this node is merely to track a moving average of DeltaX over a period defined by the physiology.
+    """
     def __init__(self, body, anchorPoint, shapeGroup, mavgPeriod=25, mavgPoints=100, **kwargs):
         BaseNode.__init__(self, body, anchorPoint, shapeGroup, **kwargs)
-        
-        """The goal of this node is merely to track a moving average of DeltaX over a period defined by the physiology.
-        """
         
         self.points = numpy.zeros(mavgPoints)
         
@@ -112,7 +106,10 @@ class DeltaX(BaseNode):
     
 #the DampedSpring spi class that provides a get_info bit.
 class SpiMuscle(pymunk.DampedSpring):
-    #TODO implement a control feature method.
+    #TODO implement a control feature method. but...this might need to happen in the base node?
+    
+    """this 'node' inherits from the pymunk DampedSpring, but has information retrieval and control features
+        paralelling normal nodes so that muscles and nodes can be grouped together in the spider brain."""
     def __init__(self, *args, **kwargs):
         #TODO this class needs dt as well to calculate the slope.
         pymunk.DampedSpring.__init__(self, *args, **kwargs)
@@ -134,7 +131,7 @@ class SpiMuscle(pymunk.DampedSpring):
     def spi_get_info(self):
         
         return [self._spi_get_length()]
-        #return [self.deltaOverDT]
+        #return [self._spi_get_length(), self.deltaOverDT] #to be consistent with a "max information" philosophy.
     
     def step(self, dt):
         current = self._spi_get_length()
@@ -172,7 +169,7 @@ class BalanceNode(BaseNode):
         
         
     def node_elements(self):
-        #FIXME maybe actually build the elements in here? otherwise sloppy.
+        #FIXME build the elements in here, not in __init__
         return self.elements
     
     def spi_get_info(self):
@@ -182,7 +179,7 @@ class BalanceNode(BaseNode):
     def _get_balance(self):
         a = (self.segBody.angle - (self.anchorBody.angle - self.origAnchorAngle))
         
-        fa = numpy.arcsin(numpy.sin(a)) #i don't really know how it works, but this is a succinct way to get the range between -pi and pi
+        fa = numpy.arcsin(numpy.sin(a)) #i don't really know how it works, but this is a succinct way to get the range between -pi and pi. yay trig.
         #print fa
         return fa
     def step(self, dt):
@@ -192,7 +189,6 @@ class BalanceNode(BaseNode):
         
         self.last = current
 
-#TODO implement a wrapper node for the muscles. this way it can be referenced in the same manner as Nodes. But, we'll need to inherit from pymunk.DampedSpring
 
 def node_dict():
     return {"balance": BalanceNode, "deltax": DeltaX}

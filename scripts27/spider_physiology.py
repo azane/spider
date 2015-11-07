@@ -9,19 +9,14 @@ lib_nodes = node_dict() #get dictionary of node classes.
 #the class inheriting pymunk.DampedSpring, adding a the method spi_get_info() for common reference to nodes.
 from spider_nodes import SpiMuscle
 
-
-"""This class builds the musculoskeletal structure of the spider from simple representations.
-    Then, it borrows from the nodes file to modularly add functionality."""
-
 #temporary test lists for spider physiology #just using lists here because we do it once per runtime, and it's not intensive enough to warrant numpy
+#TODO in the future, the spider physiology model will be gathered from files.
 testBones = [
-                        #[index, (relX, relY)|index, degreeRange].
+                        #[index, (relX, relY)|index, degreeRange]. #FIXME TODO bones attaching to bones is currently unimplemented.
                         #   this bone segment will go from index (-1 is the center), to the endpoint relative to the starting point,
-                        #       for which it may eventually be allowed to be the endpoint of a previously indexed segment, 
-                        #           but we'll need to reconcile angular constraints potentially.
-                        #   the last element is the angular bounding for this bone segment on 360 degree system.
-                        #   it's starting angle will be calculated, it will be free for a total of [2]
+                        #       for which it may eventually be allowed to be the endpoint of a previously indexed segment.
                         #indices must be less than its own.
+                        #limitations on skeletal structures come only from muscles, there are no hard-coded angular constraints.
                         [-1, [30, 50]],
                         [0, [30, -60]],
                         [1, [-25, -30]],
@@ -31,12 +26,13 @@ testBones = [
             ]
 
 testMuscles = [
-                        #[(sourceboneSegIndex, 0-1fractionDownSegment), (endBoneSeg, 0-1fractoinDownSeg), 0-1elasticity]
-                        #   the starting resting length will be derived from the bone structure witht he bones resting in the middle.
-                        #   max/min length will also need to be calculated from the bone structure?
+                        #[(sourceboneSegIndex, 0-1fractionDownSegment), (endBoneSeg, 0-1fractoinDownSeg), boolcontrollable] TODO add an elasticity modifier
+                        #   the starting resting length will be derived from the bone structure with the bones resting in the middle.
+                        #   resting length limits need to be proportional to the starting length. TODO this should be added as a modifier?
                         #indices cannot exceed those offered by the bonesArray
                         #the third value, a bool, determines whether or not this muscle has data collected, i.e. is stored in object storage in addition to drawing.
-                        #FIXME have all muscles go into the nodes array, the brain sorts out what is environmental and sensory to maximize.
+                        #NOTE that unless a designer wants to specifically constrain a body, all muscles should be controllable.
+                        #       the brain will sort it out from there as far as what is helpful to control.
                         [[0, 0.95], [3, 0.95], False],
                         [[0, 0.35], [1, 0.95], False],
                         [[0, 0.25], [2, 0.85], True],
@@ -47,20 +43,25 @@ testMuscles = [
                         [[3, 0.50], [4, 0.35], False]
                 ]
 
-#these below defines various nodes that a creature could have. these could be considered "organs".
+#the below defines various nodes that a creature could have. these could be considered "organs".
 #FIXME figure out where to put the node attachments.
         #in the bone gen loop? what if we make this a dict? and each bone end can have no more than one node attached?
         #like this testNodes = { -1: "balance", 0:"mouth", 1:"digestor" }
         #that would fix potential visualization problems with multiple nodes attached too close together.
 testNodes = [
-                #[bone index at the end of which the node will be, "the type"]
-                [0, "balance", {}],
-                [0, "deltax", {"mavgPeriod":450, "mavgPoints":225, "environment":False, "sensor":True}]
+                #[bone index at the end of which the node will be, "the type", {kwargs}] #FIXME kwargs should probably be generalized a little more?
+                [0, "balance", {}], #the balance node
+                [0, "deltax", {"mavgPeriod":450, "mavgPoints":225, "environment":False, "sensor":True}] #the velocity tracking node
             ]
 
 class SpiderPhysiology(object):
+    
+    """This class builds modularly builds the musculoskeletal structure of the spider.
+        Then, it borrows from the nodes file to modularly add functionality."""
+    
     def __init__(self, x, y, testBool, bonesArray=None, musclesArray=None, nodesArray=None):
         object.__init__(self)
+        
         #get the spider's center origin location.
         self.x = x
         self.y = y
@@ -69,7 +70,7 @@ class SpiderPhysiology(object):
         
         #the below are for data exchange reference.
         #self.nodes contains full node objects
-        #self.muscles contains "full" muscle objects (that are actually just pymunk)
+        #self.muscles contains full muscle objects
         self.nodes = [] #these do special things, defined in spider_nodes.py
         self.muscles = []
         
@@ -92,10 +93,13 @@ class SpiderPhysiology(object):
         l.extend(self.dp_bones)
         l.extend(self.dp_muscles)
         l.extend(self.dp_nodes) #maybe we don't need to draw the nodes though? maybe only draw world altering nodes? but not mere sensory nodes?
+                                #           add an option for this in the node specs?
         
         return l
         
     def apply_to_space(self, space):
+        
+        #add pymunk objects to the physics space.
         
         space.add(*self.dp_bones)
         space.add(*self.dp_muscles)
