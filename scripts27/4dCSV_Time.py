@@ -1,3 +1,16 @@
+"""Time based visualizer of 4 dimensions.
+The basic class was retrieved from this stackoverflow question: http://stackoverflow.com/questions/9401658/matplotlib-animating-a-scatter-plot
+    azane modified it a little, though I regrettably failed to document those changes. : / OOPS!
+
+#FIXME after a brief look at this class, the below may be slightly false...but i'm not a fan of this visualizer, so azane probs won't fix it. : )
+built to take csv's generated from spider
+    so the last column should be the sensor
+    the second to last column should be time
+    beyond that, it takes only the first two columns.
+        which means that columns after the first two, and before the last two, will be omitted.
+"""
+
+
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np

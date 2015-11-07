@@ -80,10 +80,9 @@ def pre_beta(indData, indexList, degree):
     
     return sans_beta
 #----<PREP>----#
-sourceCSV = sys.argv[0] #grab the first argument passed to this script from the command line. this is the source.
-destCSV = sys.argv[1] #grab the second argument passed to this script from the command line. this is the destination. this is used in <EXAMINE>
-
-data = np.genfromtxt(sourceCSV, delimiter=',').transpose() #pull in data from csv, then swap rows and columns.
+sourceCSV = sys.argv[-2] #grab the first argument passed to this script from the command line. this is the source. grab second from the end.
+destCSV = sys.argv[-1] #grab the second argument passed to this script from the command line. this is the destination. this is used in <EXAMINE>. grab first from the end.
+data = np.genfromtxt(sourceCSV, delimiter=',').transpose() #pull in data from csv, then swap rows and columns for easier numpy handling.
 
 indData = np.vstack((data[0], data[1], data[-2])) #get the first, second, and second to last columns as independent data.
 depData = data[-1] #get the last row, the dependent data.

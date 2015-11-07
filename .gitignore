@@ -6,3 +6,5 @@
 data/
 #a folder that can be used for local library tests.
 local_tests/
+#.png output by matplotlib
+.png
