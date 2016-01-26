@@ -8,3 +8,4 @@ data/
 local_tests/
 #.png output by matplotlib
 .png
+venv/
