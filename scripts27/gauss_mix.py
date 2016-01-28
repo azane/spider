@@ -1,5 +1,22 @@
-mport tensorflow as tf
+import tensorflow as tf
 import numpy as np
+
+#shape range matrices for calculations
+def shape_range_for_elementwise(r, s):
+    #r  the range matrix
+    #    [ [rb, rt]
+    #      [rb, rt] ]
+    #s sample size of ins or outs pairs
+    r = tf.transpose(r) #group rbot and rtop
+    rb, rt = tf.split(0, 2, r) #split rbot and rtop
+    
+    rt = tf.tile(rt, s)
+    rb = tf.tile(rb, s) #tile up to size
+    
+    rt = tf.reshape(rt, [s, -1])
+    rb = tf.reshape(rb, [s, -1])
+    
+    return rt, rb
 
 sess = tf.InteractiveSession()
 
@@ -8,8 +25,10 @@ envSize = 2
 #control feature inputs
 conSize = 1
 
-#FIXME inputs should be pre-converted to a range suitable for a sigmoid before processing. 
-fullIn = tf.placeholder("float", shape=[None, (envSize + conSize)])
+inCount = envSize + conSize
+
+fullIn = tf.placeholder("float", shape=[None, inCount]) #None allows a variable amount of rows, samples in this case
+
 
 #gaussianComponents
 g = 5
@@ -18,25 +37,31 @@ t = 1
 
 outCount = g + t + (g*t)
 
-fullOut_ = tf.placeholder("float", shape [None, outCount])
+fullOut_ = tf.placeholder("float", shape[None, outCount])
+
+#data ranges for elementwise conversion
+#[ [rb, rt]
+#  [rb, rt] ]
+inRange = tf.placeholder("float", shape[inCount,2]) #2 columns, rtop, rbot
+outRange = tf.placeholder("float", shape[outCount,2])
 
 #two hidden layers
 hSize = 5
 
-w1 = tf.variable(tf.zeros([fullIn, hSize]))
-b1 = tf.variable(tf.zeros([hSize])
+w1 = tf.variable(tf.zeros([inCount, hSize]))
+b1 = tf.variable(tf.zeros([hSize]))
 
-w2 = tf.variable(tf.zeroes([hSize, hSize])
-b2 = tf.variable(tf.zeroes([hSize])
+w2 = tf.variable(tf.zeroes([hSize, hSize]))
+b2 = tf.variable(tf.zeroes([hSize]))
 
-w3 = tf.variable(tf.zeroes([hSize, fullOut])
-b3 = tf.variable(tf.zeroes([fullOut])
+w3 = tf.variable(tf.zeroes([hSize, outCount]))
+b3 = tf.variable(tf.zeroes([outCount]))
 
 #get output constants distribution, but mix and make constant
 i = np.arange(0, outCount)
 np.random.shuffle(i) #in place
 
-#FIXME may need to convert these to integer tensors?
+#get indices for gauss constants
 mixIndex = tf.constant( tf.convert_to_tensor( i[ 0:g-1] ) )
 varIndex = tf.constant( tf.convert_to_tensor( i[ g:g+t-1] ) )
 meanIndex = tf.convert_to_tensor( i[ g+t:outCount-1] )
@@ -44,7 +69,13 @@ meanIndex = tf.constant( tf.reshape(meanIndex, [g,t]) ) #shape for later raw gat
 
 sess.run(tf.initialize_all_variables())
 
-#FIXME may need to transpose some of these.
+# get sample size and convert range matrices for massaging
+sCount = tf.gather( tf.shape(fullIn), 0)
+ewiseRangeIn = shape_range_for_elementwise(inRange, sCount)
+ewiseRangeOut = shape_range_for_elementwise(outRange, sCount)
+
+
+#run ANN
 lay1 = tf.tanh( tf.matmul(fullIn, w1) + b1 )
 lay2 = tf.tanh( tf.matmul(lay1, w2) + b2 )
 fullOut = tf.tanh( tf.matmul(lay2, w3) + b3 )
@@ -66,6 +97,3 @@ var = tf.div(tf.exp(tf.mul(varRaw, 4)), 5) #keep variance positive, and relevant
 
 #mean
 mean = #TODO see notes for implementation
-
-
-
