@@ -71,14 +71,21 @@ sess.run(tf.initialize_all_variables())
 
 # get sample size and convert range matrices for massaging
 sCount = tf.gather( tf.shape(fullIn), 0)
-ewiseRangeIn = shape_range_for_elementwise(inRange, sCount)
-ewiseRangeOut = shape_range_for_elementwise(outRange, sCount)
+eRInT, eRInB = shape_range_for_elementwise(inRange, sCount)
+eROutT, eROutB = shape_range_for_elementwise(outRange, sCount)
 
+# massage inputs to tanh range [-1,1]
+fullIn = (2*(fullIn-eRInB)/(eRinT-eRInB)) - 1
 
 #run ANN
 lay1 = tf.tanh( tf.matmul(fullIn, w1) + b1 )
 lay2 = tf.tanh( tf.matmul(lay1, w2) + b2 )
 fullOut = tf.tanh( tf.matmul(lay2, w3) + b3 )
+
+#TEMP until i figure out how to .gather over a dimension
+mixIndex = tf.tile(mixIndex,sCount)
+varIndex = tf.tile(varIndex,sCount)
+meanIndex = tf.tile(meanIndex,sCount)
 
 #split up fullOut into constants for gaussian mixture
 mixRaw = tf.gather(fullOut, mixIndex)
@@ -89,11 +96,15 @@ meanRaw = tf.gather(fullOut, meanIndex)
 
 #mixing coefficient
 mixExp = tf.exp(mixRaw) #e^ each element of mixRaw
-mixSum = tf.reduceSum(mixExp) #reduce to scalar, total of all
+mixSum = tf.reduce_sum(mixExp, 1, keep_dims=True) #reduce each sample to scalar, total of all, keep dims for broadcasting over samples
 mix = tf.div(mixExp, mixSum) #divide each mixing coefficient by the total.
 
 #variances
 var = tf.div(tf.exp(tf.mul(varRaw, 4)), 5) #keep variance positive, and relevant.
 
 #mean
-mean = #TODO see notes for implementation
+#expand to output range
+mean = ((.5 + (meanRaw/2)) * (eROutT - eROutB)) + eROutB
+
+#TODO create loss function...hopefully they have a builtin...at least for max likelihood
+#FIXME will we have to iterate to get constants from mga x for the collective likilihood?
