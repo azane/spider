@@ -19,7 +19,7 @@ def shape_range_for_elementwise(r, rank=1):
     return rb, rt
 
 
-sess = tf.InteractiveSession()
+#sess = tf.InteractiveSession()
 
 #environmental inputs
 envSize = 3
@@ -38,7 +38,7 @@ t = 1
 
 outCount = g + t + (g*t)
 
-fullOut_ = tf.placeholder("float", shape=[None, outCount])
+fullOut_ = tf.placeholder("float", shape=[None, t])
 
 #data ranges for elementwise conversion
 #[ [rb, rt]
@@ -74,7 +74,7 @@ def _old():
 	#np.expand_dims(meanIndex, axis=0)
 	pass
 
-sess.run(tf.initialize_all_variables())
+#sess.run(tf.initialize_all_variables())
 
 # get and convert range matrices for massaging
 eRInB, eRInT = shape_range_for_elementwise(inRange, rank=2)
@@ -153,14 +153,15 @@ def mixture_negative_log_likelihood(m, v, u, t):
 
     #sum over the likilihood of each target and gaussian component, don't reduce over samples yet.
     #FIXME i know the gaussian components are supposed to be summed, but i'm not sure about the various targets?
+    #FIXME      do i have to mix the targets like the gaussian components?
     tot_likelihood = tf.reduce_sum(likelihood, [1,2])
 
     #take natural log of sum, then reduce over samples, then negate for the final negative log likelihood
-    nll = -tf.reduce_sum(tf.log(tot_likelihood))
+    nll = -tf.reduce_sum(tf.log(tot_likelihood)) #this reduces along the final dimension, so nll will be a scalar.
 
     return nll
 
-#TEMP testing
+
 dataRaw = np.genfromtxt('data/full_with_n.csv', delimiter=',')
 f_fullIn = dataRaw[:, [0,1,2,3]]
 f_fullOut_ = dataRaw[:,[4]]
@@ -181,23 +182,34 @@ f_outRange = np.array(
                     )
 
 
-finalout = sess.run([mix, var, mean, netOut], feed_dict={
+loss = mixture_negative_log_likelihood(mix, var, mean, fullOut_)
+
+train_step = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
+
+sess = tf.Session()
+sess.run(tf.initialize_all_variables())
+
+
+#TEMP testing stuff
+finalout = sess.run(train_step, feed_dict={
                                                                 fullIn:f_fullIn,
                                                                 inRange:f_inRange,
-                                                                outRange:f_outRange
+                                                                outRange:f_outRange,
+                                                                fullOut_:f_fullOut_
                                                             })
-print "actual (mix, var, mean):"
-print 'mix shape: ' + str(finalout[0].shape)
-print finalout[0]
-print 'var shape: ' + str(finalout[1].shape)
-print finalout[1]
-print 'mean shape: ' + str(finalout[2].shape)
-print finalout[2]
+#[mix, var, mean, netOut]
+#print "actual (mix, var, mean):"
+#print 'mix shape: ' + str(finalout[0].shape)
+#print finalout[0]
+#print 'var shape: ' + str(finalout[1].shape)
+#print finalout[1]
+#print 'mean shape: ' + str(finalout[2].shape)
+#print finalout[2]
 
 
 
-print "netOut:"
-print finalout[3]
-print "netOut shape: " + str(finalout[3].shape)
-print
+#print "netOut:"
+#print finalout[3]
+#print "netOut shape: " + str(finalout[3].shape)
+#print
 
