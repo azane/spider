@@ -1,11 +1,11 @@
 #the hidden indexer thing on macs
 .DS_Store
 #the c compiled scripts
-.pyc
+*.pyc
 #the data folder, generated programatically
 data/
 #a folder that can be used for local library tests.
 local_tests/
 #.png output by matplotlib
-.png
+*.png
 venv/
