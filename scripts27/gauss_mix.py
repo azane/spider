@@ -18,6 +18,14 @@ def shape_range_for_elementwise(r, rank=1):
     
     return rb, rt
 
+def weight_variable(shape):
+    initial = tf.truncated_normal(shape, stddev=0.1)
+    return tf.Variable(initial)
+
+def bias_variable(shape):
+    initial = tf.constant(0.1, shape=shape)
+    return tf.Variable(initial)
+
 
 #sess = tf.InteractiveSession()
 
@@ -49,14 +57,14 @@ outRange = tf.placeholder("float", shape=[t,2])
 #two hidden layers
 hSize = 5
 
-w1 = tf.Variable(tf.zeros([inCount, hSize]))
-b1 = tf.Variable(tf.zeros([hSize]))
+w1 = weight_variable([inCount, hSize])
+b1 = bias_variable([hSize])
 
-w2 = tf.Variable(tf.zeros([hSize, hSize]))
-b2 = tf.Variable(tf.zeros([hSize]))
+w2 = weight_variable([hSize, hSize])
+b2 = bias_variable([hSize])
 
-w3 = tf.Variable(tf.zeros([hSize, outCount]))
-b3 = tf.Variable(tf.zeros([outCount]))
+w3 = weight_variable([hSize, outCount])
+b3 = bias_variable([outCount])
 
 def _old():
 	#get output constants distribution, but mix and make constant
@@ -122,9 +130,7 @@ var = tf.exp(tf.mul(varRaw, 2)) #keep variance positive, and relevant. this scal
 mean = ((.5 + (meanRaw/2)) * (eROutT - eROutB)) + eROutB #this scales from relevant tanh output (-1,1)
 
 
-def mixture_negative_log_likelihood(m, v, u, t):
-    #TODO create loss function...hopefully they have a builtin...at least for max likelihood
-
+def mixture_negative_log_likelihood(m, v, u, t, sess=None):
     #(s is the sample size, g is the numbe of gaussian components, t is the number of target components)
     #where m is the mixing coefficent array of shape [s,g]
     #   v is the variance array of shape [s,t]
@@ -144,17 +150,20 @@ def mixture_negative_log_likelihood(m, v, u, t):
 
     #employ terms in pre-mixed likelihood function.
     premix = v_norm*(tf.exp(-(tm_num/v_dem)))
+    if sess: print "premix: " + str(sess.run(premix))
 
     #add dim for broadcasting mixing coefficients over t, the 3rd dimension.
     m = tf.expand_dims(m, 2)
 
     #mix gaussian components
     likelihood = m*premix
+    if sess: print "likelihood: " + str(sess.run(likelihood))
 
     #sum over the likilihood of each target and gaussian component, don't reduce over samples yet.
     #FIXME i know the gaussian components are supposed to be summed, but i'm not sure about the various targets?
     #FIXME      do i have to mix the targets like the gaussian components?
     tot_likelihood = tf.reduce_sum(likelihood, [1,2])
+    if sess: print "tot_likelihood: " + str(sess.run(tot_likelihood))
 
     #take natural log of sum, then reduce over samples, then negate for the final negative log likelihood
     nll = -tf.reduce_sum(tf.log(tot_likelihood)) #this reduces along the final dimension, so nll will be a scalar.
@@ -163,8 +172,13 @@ def mixture_negative_log_likelihood(m, v, u, t):
 
 
 dataRaw = np.genfromtxt('data/full_with_n.csv', delimiter=',')
-f_fullIn = dataRaw[:, [0,1,2,3]]
-f_fullOut_ = dataRaw[:,[4]]
+
+#t for test, f for feed
+t_fullIn = dataRaw[0:dataRaw.shape[0]:2, [0,1,2,3]]
+t_fullOut_ = dataRaw[0:dataRaw.shape[0]:2,[4]]
+
+f_fullIn = dataRaw[1:dataRaw.shape[0]:2, [0,1,2,3]]
+f_fullOut_ = dataRaw[1:dataRaw.shape[0]:2,[4]]
 
 f_inRange = np.array(
                         [
@@ -181,7 +195,6 @@ f_outRange = np.array(
                         ]
                     )
 
-
 loss = mixture_negative_log_likelihood(mix, var, mean, fullOut_)
 
 train_step = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
@@ -189,14 +202,25 @@ train_step = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
 sess = tf.Session()
 sess.run(tf.initialize_all_variables())
 
+for i in range(1):    
+    s_i = np.random.random_integers(0, high=f_fullIn.shape[0]-1, size=300)
+    t_dict = {
+                fullIn:f_fullIn[s_i],
+                inRange:f_inRange,
+                outRange:f_outRange,
+                fullOut_:f_fullOut_[s_i]
+            }
+    
+    sess.run(train_step, feed_dict=t_dict)
+    #print "netout sample: " + str(sess.run([netOut], feed_dict=t_dict)[0])
 
-#TEMP testing stuff
-finalout = sess.run(train_step, feed_dict={
-                                                                fullIn:f_fullIn,
-                                                                inRange:f_inRange,
-                                                                outRange:f_outRange,
-                                                                fullOut_:f_fullOut_
-                                                            })
+test = sess.run(loss, feed_dict={
+                                    fullIn:t_fullIn,
+                                    inRange:f_inRange,
+                                    outRange:f_outRange,
+                                    fullOut_:t_fullOut_
+                                })
+print 'final log likilihood of test sample: ' + str(test)
 #[mix, var, mean, netOut]
 #print "actual (mix, var, mean):"
 #print 'mix shape: ' + str(finalout[0].shape)
