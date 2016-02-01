@@ -74,12 +74,6 @@ def _old():
 	#np.expand_dims(meanIndex, axis=0)
 	pass
 
-#TEMP
-print 'Indices, pre tiling to sample size:'
-print 'mixIndex: ' + str(mixIndex.eval())
-print 'varIndex: ' + str(varIndex.eval())
-print 'meanIndex: ' + str(meanIndex.eval())
-
 sess.run(tf.initialize_all_variables())
 
 # get and convert range matrices for massaging
@@ -110,7 +104,7 @@ def _old():
 #parse and shape netOut into coefficients
 mixRaw = tf.slice(netOut, begin=[0,0], size=[-1,g])
 varRaw = tf.slice(netOut, begin=[0,g], size=[-1,t])
-meanRaw = tf.reshape(tf.slice(netOut, begin=[0,g+t], size=[-1,-1]), shape=[g,t])
+meanRaw = tf.reshape(tf.slice(netOut, begin=[0,g+t], size=[-1,-1]), shape=[-1,g,t])
 
 
 #massaging functions, prep ANN outputs for use in gaussian mixture, see notes for explanation
@@ -121,11 +115,11 @@ mixSum = tf.reduce_sum(mixExp, 1, keep_dims=True) #reduce each sample to scalar,
 mix = tf.div(mixExp, mixSum) #divide each mixing coefficient by the total.
 
 #variances
-var = tf.div(tf.exp(tf.mul(varRaw, 4)), 5) #keep variance positive, and relevant.
+var = tf.exp(tf.mul(varRaw, 2)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
 
 #mean
 #expand to output range
-mean = ((.5 + (meanRaw/2)) * (eROutT - eROutB)) + eROutB
+mean = ((.5 + (meanRaw/2)) * (eROutT - eROutB)) + eROutB #this scales from relevant tanh output (-1,1)
 
 
 #TEMP testing
@@ -149,24 +143,24 @@ f_outRange = np.array(
                     )
 
 
-finalout = sess.run([mixIndex, varIndex, meanIndex, mixRaw, varRaw, meanRaw, netOut], feed_dict={
+finalout = sess.run([mix, var, mean, netOut], feed_dict={
                                                                 fullIn:f_fullIn,
-                                                                #sCount:f_fullIn.shape[0],
                                                                 inRange:f_inRange,
                                                                 outRange:f_outRange
                                                             })
-print "Indices (mix, var, mean):"
+print "actual (mix, var, mean):"
+print 'mix shape: ' + str(finalout[0].shape)
 print finalout[0]
+print 'var shape: ' + str(finalout[1].shape)
 print finalout[1]
+print 'mean shape: ' + str(finalout[2].shape)
 print finalout[2]
-print
-print "Raw (mix, var, mean):"
-print finalout[3]
-print finalout[4]
-print finalout[5]
-print
+
+
+
 print "netOut:"
-print finalout[6]
-print "netOut shape: " + str(finalout[6].shape)
+print finalout[3]
+print "netOut shape: " + str(finalout[3].shape)
 print
+
 #TODO create loss function...hopefully they have a builtin...at least for max likelihood
