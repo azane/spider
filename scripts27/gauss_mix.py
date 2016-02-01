@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 
 #shape range matrices for calculations
-def shape_range_for_elementwise(r, s):
+def shape_range_for_elementwise(r, rank=1):
     #r  the range matrix
     #    [ [rb, rt]
     #      [rb, rt] ]
@@ -10,13 +10,13 @@ def shape_range_for_elementwise(r, s):
     r = tf.transpose(r) #group rbot and rtop
     rb, rt = tf.split(0, 2, r) #split rbot and rtop
     
-    rt = tf.tile(rt, s)
-    rb = tf.tile(rb, s) #tile up to size
+    addRank = rank - 1
     
-    rt = tf.reshape(rt, [s, -1])
-    rb = tf.reshape(rb, [s, -1])
+    for d in range(addRank):
+        tf.expand_dims(rb, 1)
+        tf.expand_dims (rt, 1)
     
-    return rt, rb
+    return rb, rt
 
 sess = tf.InteractiveSession()
 
@@ -37,55 +37,57 @@ t = 1
 
 outCount = g + t + (g*t)
 
-fullOut_ = tf.placeholder("float", shape[None, outCount])
+fullOut_ = tf.placeholder("float", shape=[None, outCount])
 
 #data ranges for elementwise conversion
 #[ [rb, rt]
 #  [rb, rt] ]
-inRange = tf.placeholder("float", shape[inCount,2]) #2 columns, rtop, rbot
-outRange = tf.placeholder("float", shape[outCount,2])
+inRange = tf.placeholder("float", shape=[inCount,2]) #2 columns, rtop, rbot
+outRange = tf.placeholder("float", shape=[outCount,2])
 
 #two hidden layers
 hSize = 5
 
-w1 = tf.variable(tf.zeros([inCount, hSize]))
-b1 = tf.variable(tf.zeros([hSize]))
+w1 = tf.Variable(tf.zeros([inCount, hSize]))
+b1 = tf.Variable(tf.zeros([hSize]))
 
-w2 = tf.variable(tf.zeroes([hSize, hSize]))
-b2 = tf.variable(tf.zeroes([hSize]))
+w2 = tf.Variable(tf.zeros([hSize, hSize]))
+b2 = tf.Variable(tf.zeros([hSize]))
 
-w3 = tf.variable(tf.zeroes([hSize, outCount]))
-b3 = tf.variable(tf.zeroes([outCount]))
+w3 = tf.Variable(tf.zeros([hSize, outCount]))
+b3 = tf.Variable(tf.zeros([outCount]))
 
 #get output constants distribution, but mix and make constant
 i = np.arange(0, outCount)
 np.random.shuffle(i) #in place
 
 #get indices for gauss constants
-mixIndex = tf.constant( tf.convert_to_tensor( i[ 0:g-1] ) )
-varIndex = tf.constant( tf.convert_to_tensor( i[ g:g+t-1] ) )
-meanIndex = tf.convert_to_tensor( i[ g+t:outCount-1] )
-meanIndex = tf.constant( tf.reshape(meanIndex, [g,t]) ) #shape for later raw gather
+mixIndex = tf.constant(i[0:g])
+varIndex = tf.constant(i[g:g+t])
+meanIndex = i[g+t:outCount]
+meanIndex = tf.constant(meanIndex.reshape((g,t)))  #shape for later raw gather
 
 sess.run(tf.initialize_all_variables())
 
 # get sample size and convert range matrices for massaging
-sCount = tf.gather( tf.shape(fullIn), 0)
-eRInT, eRInB = shape_range_for_elementwise(inRange, sCount)
-eROutT, eROutB = shape_range_for_elementwise(outRange, sCount)
+sCount = tf.gather( tf.shape(fullIn), 0) #NOTE this is a tensor woth one int32 value inside
+eRInB, eRInT = shape_range_for_elementwise(inRange, rank=2)
+eROutB, eROutT= shape_range_for_elementwise(outRange, rank=3)
 
 # massage inputs to tanh range [-1,1]
-fullIn = (2*(fullIn-eRInB)/(eRinT-eRInB)) - 1
+fullIn = (2*(fullIn-eRInB)/(eRInT-eRInB)) - 1
 
 #run ANN
 lay1 = tf.tanh( tf.matmul(fullIn, w1) + b1 )
 lay2 = tf.tanh( tf.matmul(lay1, w2) + b2 )
 fullOut = tf.tanh( tf.matmul(lay2, w3) + b3 )
 
-#TEMP until i figure out how to .gather over a dimension
-mixIndex = tf.tile(mixIndex,sCount)
-varIndex = tf.tile(varIndex,sCount)
-meanIndex = tf.tile(meanIndex,sCount)
+#TEMP until i figure out how to .gather over a dimension (the sample dimension)
+#id love to not do this tileShape thing, but sCount is a 0 dim tensor, and cant be paired with a python int scalar
+tileShape = tf.concat(0, [tf.convert_to_tensor([1]),tf.expand_dims(sCount,0)])
+mixIndex = tf.tile(mixIndex,tileShape)
+varIndex =tf.tile(varIndex,tileShape)
+meanIndex = tf.tile(meanIndex,tileShape)
 
 #split up fullOut into constants for gaussian mixture
 mixRaw = tf.gather(fullOut, mixIndex)
@@ -107,4 +109,4 @@ var = tf.div(tf.exp(tf.mul(varRaw, 4)), 5) #keep variance positive, and relevant
 mean = ((.5 + (meanRaw/2)) * (eROutT - eROutB)) + eROutB
 
 #TODO create loss function...hopefully they have a builtin...at least for max likelihood
-#FIXME will we have to iterate to get constants from mga x for the collective likilihood?
+
