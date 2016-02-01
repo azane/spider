@@ -58,18 +58,21 @@ b2 = tf.Variable(tf.zeros([hSize]))
 w3 = tf.Variable(tf.zeros([hSize, outCount]))
 b3 = tf.Variable(tf.zeros([outCount]))
 
-#get output constants distribution, but mix and make constant
-i = np.arange(0, outCount)
-np.random.shuffle(i) #in place
+def _old():
+	#get output constants distribution, but mix and make constant
+	#FIXME this was to prevent too much weight sharing...but i can figure outhow to [: [1,4,5]] index in tensorflow! so drop it for contiguousness.
+	#i = np.arange(0, outCount)
+	#np.random.shuffle(i) #in place
 
-#get indices for gauss constants
-mixIndex = tf.constant(i[0:g])
-#np.expand_dims(mixIndex, axis=0) #add a dimension for gather to broadcast over samples.
-varIndex = tf.constant(i[g:g+t])
-#np.expand_dims(varIndex, axis=0)
-meanIndex = i[g+t:outCount]
-meanIndex = tf.constant(meanIndex.reshape((g,t)))  #shape for later raw gather
-#np.expand_dims(meanIndex, axis=0)
+	#get indices for gauss constants
+	#mixIndex = tf.constant(i[0:g])
+	#np.expand_dims(mixIndex, axis=0) #add a dimension for gather to broadcast over samples.
+	#varIndex = tf.constant(i[g:g+t])
+	#np.expand_dims(varIndex, axis=0)
+	#meanIndex = tf.constant(i[g+t:outCount])
+	#meanIndex.reshape((g,t)) ultimately, this needs to be in this shape.
+	#np.expand_dims(meanIndex, axis=0)
+	pass
 
 #TEMP
 print 'Indices, pre tiling to sample size:'
@@ -79,9 +82,7 @@ print 'meanIndex: ' + str(meanIndex.eval())
 
 sess.run(tf.initialize_all_variables())
 
-# get sample size and convert range matrices for massaging
-#FIXME not deferred, so this is 'None': sCount = tf.gather( tf.shape(fullIn), 0) #NOTE this is a tensor woth one int32 value inside
-#sCount = tf.placeholder("int32", shape=(0,)) #TEMP just pass the sample size.
+# get and convert range matrices for massaging
 eRInB, eRInT = shape_range_for_elementwise(inRange, rank=2)
 eROutB, eROutT= shape_range_for_elementwise(outRange, rank=3)
 
@@ -93,17 +94,24 @@ lay1 = tf.tanh( tf.matmul(fullIn, w1) + b1 )
 lay2 = tf.tanh( tf.matmul(lay1, w2) + b2 )
 netOut = tf.tanh( tf.matmul(lay2, w3) + b3 )
 
-#TEMP until i figure out how to .gather over a dimension (the sample dimension)
-#id love to not do this tileShape thing, but sCount is a 0 dim tensor, and cant be paired with a python int scalar
-#tileShape = tf.concat(0, [tf.convert_to_tensor([1]), tf.expand_dims(sCount,0)])
-#mixIndex = tf.tile(mixIndex,sCount)
-#varIndex = tf.tile(varIndex,tileShape)
-#meanIndex = tf.tile(meanIndex,tileShape)
 
-#split up fullOut into constants for gaussian mixture, gather over rows
-mixRaw = tf.gather(netOut, mixIndex) #netOut[:, mixIndex]
-varRaw = tf.gather(netOut, varIndex) #varRaw[:, varIndex]
-meanRaw = tf.gather(netOut, meanIndex) #meanRaw[:, meanIndex].reshape((g,t))
+def _old():
+	#TEMP the numpy version of the operations i want are below. but i can't find a good way to do it in tensorflow.
+	#netOut[:, mixIndex]
+	#varRaw[:, varIndex]
+	#meanRaw[:, meanIndex].reshape((g,t))
+
+	#split up fullOut into constants for gaussian mixture, gather over rows
+	#mixRaw = tf.gather(netOut, mixIndex)
+	#varRaw = tf.gather(netOut, varIndex)
+	#meanRaw = tf.gather(netOut, meanIndex)
+	pass
+
+#parse and shape netOut into coefficients
+mixRaw = tf.slice(netOut, begin=[0,0], size=[-1,g])
+varRaw = tf.slice(netOut, begin=[0,g], size=[-1,t])
+meanRaw = tf.reshape(tf.slice(netOut, begin=[0,g+t], size=[-1,-1]), shape=[g,t])
+
 
 #massaging functions, prep ANN outputs for use in gaussian mixture, see notes for explanation
 
