@@ -53,8 +53,10 @@ class BaseNode(object):
         raise NotImplementedError("'node_elements' must be implemented in child classes. It should return all pymunk bodies, shapes, constraints, etc. of the node.")
     def get_info(self):
         raise NotImplementedError("'get_info' must be implemented in child classes. It should return a list of the sensor's information.")
+    def spi_get_info(self):
+        raise NotImplementedError("'spi_get_info' must be implemented in child classes. It should return a list of the sensor's information.")
     def step(self, dt):
-        pass #unimplemented this does nothing, but it's not considered an error.
+        pass #unimplemented, this does nothing, but it's not considered an error.
 
 #TODO part of a flexible, mutateable node model might be to have sigmoidal or gaussian settings for randomly generated defaults.
 #           then, if the physiology mutates to take advantage of that particular node initialization argument, good!
@@ -132,7 +134,7 @@ class SpiMuscle(pymunk.DampedSpring):
         
         return [self._spi_get_length()]
         #return [self._spi_get_length(), self.deltaOverDT] #to be consistent with a "max information" philosophy.
-    
+        
     def step(self, dt):
         current = self._spi_get_length()
         
@@ -188,6 +190,13 @@ class BalanceNode(BaseNode):
         self.deltaOverDT = (current - self.last)/dt
         
         self.last = current
+
+"""brainstorming
+
+the control features' node affectation should happen in the code of those nodes.
+    this makes the most sense as far as
+
+"""
 
 
 def node_dict():
