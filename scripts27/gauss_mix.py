@@ -18,10 +18,11 @@ def shape_range_for_elementwise(r, rank=1):
     
     return rb, rt
 
+
 sess = tf.InteractiveSession()
 
 #environmental inputs
-envSize = 2
+envSize = 3
 #control feature inputs
 conSize = 1
 
@@ -43,7 +44,7 @@ fullOut_ = tf.placeholder("float", shape=[None, outCount])
 #[ [rb, rt]
 #  [rb, rt] ]
 inRange = tf.placeholder("float", shape=[inCount,2]) #2 columns, rtop, rbot
-outRange = tf.placeholder("float", shape=[outCount,2])
+outRange = tf.placeholder("float", shape=[t,2])
 
 #two hidden layers
 hSize = 5
@@ -63,14 +64,24 @@ np.random.shuffle(i) #in place
 
 #get indices for gauss constants
 mixIndex = tf.constant(i[0:g])
+#np.expand_dims(mixIndex, axis=0) #add a dimension for gather to broadcast over samples.
 varIndex = tf.constant(i[g:g+t])
+#np.expand_dims(varIndex, axis=0)
 meanIndex = i[g+t:outCount]
 meanIndex = tf.constant(meanIndex.reshape((g,t)))  #shape for later raw gather
+#np.expand_dims(meanIndex, axis=0)
+
+#TEMP
+print 'Indices, pre tiling to sample size:'
+print 'mixIndex: ' + str(mixIndex.eval())
+print 'varIndex: ' + str(varIndex.eval())
+print 'meanIndex: ' + str(meanIndex.eval())
 
 sess.run(tf.initialize_all_variables())
 
 # get sample size and convert range matrices for massaging
-sCount = tf.gather( tf.shape(fullIn), 0) #NOTE this is a tensor woth one int32 value inside
+#FIXME not deferred, so this is 'None': sCount = tf.gather( tf.shape(fullIn), 0) #NOTE this is a tensor woth one int32 value inside
+#sCount = tf.placeholder("int32", shape=(0,)) #TEMP just pass the sample size.
 eRInB, eRInT = shape_range_for_elementwise(inRange, rank=2)
 eROutB, eROutT= shape_range_for_elementwise(outRange, rank=3)
 
@@ -80,19 +91,19 @@ fullIn = (2*(fullIn-eRInB)/(eRInT-eRInB)) - 1
 #run ANN
 lay1 = tf.tanh( tf.matmul(fullIn, w1) + b1 )
 lay2 = tf.tanh( tf.matmul(lay1, w2) + b2 )
-fullOut = tf.tanh( tf.matmul(lay2, w3) + b3 )
+netOut = tf.tanh( tf.matmul(lay2, w3) + b3 )
 
 #TEMP until i figure out how to .gather over a dimension (the sample dimension)
 #id love to not do this tileShape thing, but sCount is a 0 dim tensor, and cant be paired with a python int scalar
-tileShape = tf.concat(0, [tf.convert_to_tensor([1]),tf.expand_dims(sCount,0)])
-mixIndex = tf.tile(mixIndex,tileShape)
-varIndex =tf.tile(varIndex,tileShape)
-meanIndex = tf.tile(meanIndex,tileShape)
+#tileShape = tf.concat(0, [tf.convert_to_tensor([1]), tf.expand_dims(sCount,0)])
+#mixIndex = tf.tile(mixIndex,sCount)
+#varIndex = tf.tile(varIndex,tileShape)
+#meanIndex = tf.tile(meanIndex,tileShape)
 
-#split up fullOut into constants for gaussian mixture
-mixRaw = tf.gather(fullOut, mixIndex)
-varRaw = tf.gather(fullOut, varIndex)
-meanRaw = tf.gather(fullOut, meanIndex)
+#split up fullOut into constants for gaussian mixture, gather over rows
+mixRaw = tf.gather(netOut, mixIndex) #netOut[:, mixIndex]
+varRaw = tf.gather(netOut, varIndex) #varRaw[:, varIndex]
+meanRaw = tf.gather(netOut, meanIndex) #meanRaw[:, meanIndex].reshape((g,t))
 
 #massaging functions, prep ANN outputs for use in gaussian mixture, see notes for explanation
 
@@ -108,5 +119,46 @@ var = tf.div(tf.exp(tf.mul(varRaw, 4)), 5) #keep variance positive, and relevant
 #expand to output range
 mean = ((.5 + (meanRaw/2)) * (eROutT - eROutB)) + eROutB
 
-#TODO create loss function...hopefully they have a builtin...at least for max likelihood
 
+#TEMP testing
+dataRaw = np.genfromtxt('data/full_with_n.csv', delimiter=',')
+f_fullIn = dataRaw[:, [0,1,2,3]]
+f_fullOut_ = dataRaw[:,[4]]
+
+f_inRange = np.array(
+                        [
+                            [f_fullIn[:,0].min(), f_fullIn[:,0].max()],
+                            [f_fullIn[:,1].min(), f_fullIn[:,1].max()],
+                            [f_fullIn[:,2].min(), f_fullIn[:,2].max()],
+                            [f_fullIn[:,3].min(), f_fullIn[:,3].max()]
+                        ]
+                    )
+
+f_outRange = np.array(
+                        [
+                            [f_fullOut_[:,0].min(), f_fullOut_[:,0].max()]
+                        ]
+                    )
+
+
+finalout = sess.run([mixIndex, varIndex, meanIndex, mixRaw, varRaw, meanRaw, netOut], feed_dict={
+                                                                fullIn:f_fullIn,
+                                                                #sCount:f_fullIn.shape[0],
+                                                                inRange:f_inRange,
+                                                                outRange:f_outRange
+                                                            })
+print "Indices (mix, var, mean):"
+print finalout[0]
+print finalout[1]
+print finalout[2]
+print
+print "Raw (mix, var, mean):"
+print finalout[3]
+print finalout[4]
+print finalout[5]
+print
+print "netOut:"
+print finalout[6]
+print "netOut shape: " + str(finalout[6].shape)
+print
+#TODO create loss function...hopefully they have a builtin...at least for max likelihood
