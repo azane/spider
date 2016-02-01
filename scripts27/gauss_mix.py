@@ -122,6 +122,44 @@ var = tf.exp(tf.mul(varRaw, 2)) #keep variance positive, and relevant. this scal
 mean = ((.5 + (meanRaw/2)) * (eROutT - eROutB)) + eROutB #this scales from relevant tanh output (-1,1)
 
 
+def mixture_negative_log_likelihood(m, v, u, t):
+    #TODO create loss function...hopefully they have a builtin...at least for max likelihood
+
+    #(s is the sample size, g is the numbe of gaussian components, t is the number of target components)
+    #where m is the mixing coefficent array of shape [s,g]
+    #   v is the variance array of shape [s,t]
+    #   u is the mean (mew) array of shape [s,g,t]
+    #   t is the target array of shape [s,t]
+
+    #prep terms with variance inside.
+    #add a dimension of 1 to be broadcast over the 'g' dimension in other tensors.
+    v = tf.expand_dims(v, 1) #add after dim index 1 for shape [s, 1, t]
+
+    v_norm = 1/(v*tf.sqrt(2*np.pi))
+    v_dem = 2*tf.square(v)
+
+    #prep numerator term with corresponding sample target values and net proposed means
+    t = tf.expand_dims(t, 1) #add dim at 2nd position for broadcasting over means.
+    tm_num = tf.square(t-u)
+
+    #employ terms in pre-mixed likelihood function.
+    premix = v_norm*(tf.exp(-(tm_num/v_dem)))
+
+    #add dim for broadcasting mixing coefficients over t, the 3rd dimension.
+    m = tf.expand_dims(m, 2)
+
+    #mix gaussian components
+    likelihood = m*premix
+
+    #sum over the likilihood of each target and gaussian component, don't reduce over samples yet.
+    #FIXME i know the gaussian components are supposed to be summed, but i'm not sure about the various targets?
+    tot_likelihood = tf.reduce_sum(likelihood, [1,2])
+
+    #take natural log of sum, then reduce over samples, then negate for the final negative log likelihood
+    nll = -tf.reduce_sum(tf.log(tot_likelihood))
+
+    return nll
+
 #TEMP testing
 dataRaw = np.genfromtxt('data/full_with_n.csv', delimiter=',')
 f_fullIn = dataRaw[:, [0,1,2,3]]
@@ -163,4 +201,3 @@ print finalout[3]
 print "netOut shape: " + str(finalout[3].shape)
 print
 
-#TODO create loss function...hopefully they have a builtin...at least for max likelihood
