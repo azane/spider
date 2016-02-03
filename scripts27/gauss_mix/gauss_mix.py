@@ -1,8 +1,10 @@
 import tensorflow as tf
 import numpy as np
+import sys
 
 ##TODO command line calling structure
-#python thisfile.py <str:x.csv> <str:t.csv> <int:gaussian components> <int: ANN hidden layer size>
+#python thisfile.py <str:data.npz> <int:gaussian components> <int: ANN hidden layer size>
+#   where data.npz should have two arrays, x and t.
 #TODO infer in and outsize by the number of columns in the x/t csv files.
 #TODO put all this in a __main__ section so that it can be called from the command line, or as a python function. : )
 
@@ -33,7 +35,7 @@ def bias_variable(shape):
 
 #-----<Mixture Construction>-----
 #environmental inputs
-envSize = 4
+envSize = 1
 #control feature inputs
 conSize = 0
 #targetDims
@@ -71,7 +73,7 @@ t_hist = tf.histogram_summary("t", fullOut_)
 #-----<ANN Construction>-----
 with tf.name_scope('ANN_const') as scope:
     #two hidden layers of size:
-    hSize = 30
+    hSize = 15
 
     w1 = weight_variable([inCount, hSize])
     b1 = bias_variable([hSize])
@@ -122,7 +124,7 @@ with tf.name_scope('massage_mix') as scope:
 with tf.name_scope('massage_var') as scope:
     #variances
     #FIXME TODO we may want to make this a function of the range of the target for which this variance will be used.
-    var = tf.exp(tf.mul(varRaw, 7)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
+    var = tf.exp(tf.mul(varRaw, 2)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
 
 with tf.name_scope('massage_mean') as scope:
     #mean
@@ -184,21 +186,23 @@ def mixture_negative_log_likelihood(m, v, u, t):
 
 
 #----<Read Data>----
-dataRaw = np.genfromtxt('data/full_with_n.csv', delimiter=',')
+with np.load(sys.argv[1], allow_pickle=False) as data:
+    sampleRaw = data['s']
+    testRaw = data['t']
+
 
 #t for test, f for feed
-t_fullIn = dataRaw[0:dataRaw.shape[0]:2, [0,1,2,3]]
-t_fullOut_ = dataRaw[0:dataRaw.shape[0]:2,[4]]
+#in.shape == [s,x]
+#out.shape == [s,t]
+t_fullIn = np.expand_dims(testRaw[:,0], 0).transpose()
+t_fullOut_ = np.expand_dims(testRaw[:,1], 0).transpose()
 
-f_fullIn = dataRaw[1:dataRaw.shape[0]:2, [0,1,2,3]]
-f_fullOut_ = dataRaw[1:dataRaw.shape[0]:2,[4]]
+f_fullIn = np.expand_dims(sampleRaw[:,0], 0).transpose()
+f_fullOut_ = np.expand_dims(sampleRaw[:,1], 0).transpose()
 
 f_inRange = np.array(
                         [
-                            [f_fullIn[:,0].min(), f_fullIn[:,0].max()],
-                            [f_fullIn[:,1].min(), f_fullIn[:,1].max()],
-                            [f_fullIn[:,2].min(), f_fullIn[:,2].max()],
-                            [f_fullIn[:,3].min(), f_fullIn[:,3].max()]
+                            [f_fullIn[:,0].min(), f_fullIn[:,0].max()]
                         ]
                     )
 
@@ -228,7 +232,7 @@ sess.run(tf.initialize_all_variables())
 
 
 #training loop
-for i in range(1000):
+for i in range(300):
 
     if i % 20 == 0:
         s_i = np.random.random_integers(0, high=t_fullIn.shape[0]-1, size=500)
@@ -250,23 +254,25 @@ for i in range(1000):
         #writer.flush()
         
         #---<Make more flexible with range>----
-        #sampleSize = result[2].shape[0]
-        #viewSize = 20
-        #manualRange = .0015
+        sampleSize = result[2].shape[0]
+        viewSize = 20
+        manualRange = 1
         
-        #test_means = result[2][0:sampleSize:int(sampleSize/viewSize)]
-        #test_targets = np.expand_dims(t_fullOut_[s_i][0:sampleSize:int(sampleSize/viewSize)], 1)
-        #test_diff = np.abs(test_targets - test_means)
-        #test_best_mean_diff = np.amin(test_diff, axis=1)
-        #test_avg_diff = np.mean(test_best_mean_diff)
+        test_means = result[2][0:sampleSize:int(sampleSize/viewSize)]
+        test_targets = np.expand_dims(t_fullOut_[s_i][0:sampleSize:int(sampleSize/viewSize)], 1)
+        test_diff = np.abs(test_targets - test_means)
+        test_best_mean_diff = np.amin(test_diff, axis=1)
+        test_avg_diff = np.mean(test_best_mean_diff)
         #----</MMFWR>----
         
         print("Loss at step %s: %s" % (i, test_loss))
-        #<MMFWR>print("Average target distance from best mean as percentage of range at step %s: %s" % (i, test_avg_diff/manualRange))#</MMFWR
+        #<MMFWR>
+        print("Average target distance from best mean as percentage of range at step %s: %s" % (i, test_avg_diff/manualRange))
+        #</MMFWR
         print "--------"
 
     else:
-        s_i = np.random.random_integers(0, high=f_fullIn.shape[0]-1, size=50)
+        s_i = np.random.random_integers(0, high=f_fullIn.shape[0]-1, size=1)
         f_dict = {
                     fullIn:f_fullIn[s_i],
                     inRange:f_inRange,
@@ -275,3 +281,16 @@ for i in range(1000):
                 }
 
         sess.run(train_step, feed_dict=f_dict)
+
+
+
+#write x, m, v, and u to a .npy file for later sampling.
+f_dict = {
+            fullIn:t_fullIn,
+            inRange:f_inRange,
+            outRange:f_outRange,
+            fullOut_:t_fullOut_
+        }
+result = sess.run([mix, var, mean], feed_dict=f_dict)
+#TODO generate a unique set of x values within the relevant x ranges.
+np.savez('data/xmvu', x=t_fullIn, m=result[0], v=result[1], u=result[2])
