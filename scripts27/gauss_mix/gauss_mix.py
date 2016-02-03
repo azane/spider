@@ -345,8 +345,14 @@ if __name__ == "__main__":
     
     #----<Training Constants>----
     ITERATIONS = range(1000) #iterable
+    
     TEST_BATCH_SIZE = 500
+    if t_x.shape[0] < TEST_BATCH_SIZE:
+        TEST_BATCH_SIZE = t_x.shape[0]
+        
     TRAIN_BATCH_SIZE = 1000
+    if s_x.shape[0] < TRAIN_BATCH_SIZE:
+        TRAIN_BATCH_SIZE = s_x.shape[0]
     #----</Training Constants>----
     
     #----<Training Setup>----
@@ -367,79 +373,79 @@ if __name__ == "__main__":
         if i % 10 == 0: #run reports every 10 iterations.
             feed_dict[modelDict['x']], feed_dict[modelDict['t']] = sample_batch(t_x, t_t, TEST_BATCH_SIZE) #update feed_dict with test batch
             result = modelDict['sess'].run([modelDict['summaries'], modelDict['loss']]) #run model with test batch
-            #TODO write to summary
-            #TODO print loss at this step
-        #TODO else
-            #TODO update feed_dict with training batch
-            #TODO run model with training batch
+            modelDict['summaryWriter'].add_summary(result[0], i) #write to summary
+            print("Loss at step %s: %s" % (i, result[1])) #print loss
+        else:
+            #update feed_dict with test batch #update feed_dict with training batch
+            feed_dict[modelDict['x']], feed_dict[modelDict['t']] = sample_batch(s_x, s_t, TRAIN_BATCH_SIZE)
+            result = modelDict['sess'].run([modelDict['summaries'], modelDict['loss']]) #run model with test batch #run model with training batch
         
-    
-    #TODO evaluate the trained model at m, v, and u with the test data.
-    #TODO write this to an npz file for later sampling
+    #----<Store for Sampling>----
+    feed_dict[modelDict['x']], feed_dict[modelDict['t']] = t_x, t_t #update feed_dict with full test data batch
+    result = sess.run([modelDict['mix'], modelDict['var'], modelDict['mean']], feed_dict=f_dict) #evaluate the trained model at m, v, and u with the test data.
+    np.savez(XMVU_PATH, x=t_x, m=result[0], v=result[1], u=result[2]) #write this to an npz file for later sampling
+    #----</Store for Sampling>----
 
+def old_delete_me():
+    #training loop
+    for i in range(300):
 
-
-
-
-#training loop
-for i in range(300):
-
-    if i % 20 == 0:
-        f_dict = {
-                    fullIn:t_fullIn[s_i],
-                    inRange:f_inRange,
-                    outRange:f_outRange,
-                    fullOut_:t_fullOut_[s_i]
+        if i % 20 == 0:
+            f_dict = {
+                        fullIn:t_fullIn[s_i],
+                        inRange:f_inRange,
+                        outRange:f_outRange,
+                        fullOut_:t_fullOut_[s_i]
                     
-                    #overfitting test:
-                    #fullIn:f_fullIn[s_i],
-                    #fullOut_:f_fullOut_[s_i]
-                }
+                        #overfitting test:
+                        #fullIn:f_fullIn[s_i],
+                        #fullOut_:f_fullOut_[s_i]
+                    }
 
-        result = sess.run([merged, loss, mean], feed_dict=f_dict)
-        summary_str = result[0]
-        test_loss = result[1]
-        writer.add_summary(summary_str, i)
-        #writer.flush()
+            result = sess.run([merged, loss, mean], feed_dict=f_dict)
+            summary_str = result[0]
+            test_loss = result[1]
+            writer.add_summary(summary_str, i)
+            #writer.flush()
         
-        #---<Make more flexible with range>----
-        sampleSize = result[2].shape[0]
-        viewSize = 20
-        manualRange = 1
+            #---<Make more flexible with range>----
+            sampleSize = result[2].shape[0]
+            viewSize = 20
+            manualRange = 1
         
-        test_means = result[2][0:sampleSize:int(sampleSize/viewSize)]
-        test_targets = np.expand_dims(t_fullOut_[s_i][0:sampleSize:int(sampleSize/viewSize)], 1)
-        test_diff = np.abs(test_targets - test_means)
-        test_best_mean_diff = np.amin(test_diff, axis=1)
-        test_avg_diff = np.mean(test_best_mean_diff)
-        #----</MMFWR>----
+            test_means = result[2][0:sampleSize:int(sampleSize/viewSize)]
+            test_targets = np.expand_dims(t_fullOut_[s_i][0:sampleSize:int(sampleSize/viewSize)], 1)
+            test_diff = np.abs(test_targets - test_means)
+            test_best_mean_diff = np.amin(test_diff, axis=1)
+            test_avg_diff = np.mean(test_best_mean_diff)
+            #----</MMFWR>----
         
-        print("Loss at step %s: %s" % (i, test_loss))
-        #<MMFWR>
-        print("Average target distance from best mean as percentage of range at step %s: %s" % (i, test_avg_diff/manualRange))
-        #</MMFWR
-        print "--------"
+            print("Loss at step %s: %s" % (i, test_loss))
+            #<MMFWR>
+            print("Average target distance from best mean as percentage of range at step %s: %s" % (i, test_avg_diff/manualRange))
+            #</MMFWR
+            print "--------"
 
-    else:
-        s_i = np.random.random_integers(0, high=f_fullIn.shape[0]-1, size=1)
-        f_dict = {
-                    fullIn:f_fullIn[s_i],
-                    inRange:f_inRange,
-                    outRange:f_outRange,
-                    fullOut_:f_fullOut_[s_i]
-                }
+        else:
+            s_i = np.random.random_integers(0, high=f_fullIn.shape[0]-1, size=1)
+            f_dict = {
+                        fullIn:f_fullIn[s_i],
+                        inRange:f_inRange,
+                        outRange:f_outRange,
+                        fullOut_:f_fullOut_[s_i]
+                    }
 
-        sess.run(train_step, feed_dict=f_dict)
+            sess.run(train_step, feed_dict=f_dict)
 
 
 
-#write x, m, v, and u to a .npy file for later sampling.
-f_dict = {
-            fullIn:t_fullIn,
-            inRange:f_inRange,
-            outRange:f_outRange,
-            fullOut_:t_fullOut_
-        }
-result = sess.run([mix, var, mean], feed_dict=f_dict)
-#TODO generate a unique set of x values within the relevant x ranges.
-np.savez(XMVU_PATH, x=t_fullIn, m=result[0], v=result[1], u=result[2])
+    #write x, m, v, and u to a .npy file for later sampling.
+    f_dict = {
+                fullIn:t_fullIn,
+                inRange:f_inRange,
+                outRange:f_outRange,
+                fullOut_:t_fullOut_
+            }
+    result = sess.run([mix, var, mean], feed_dict=f_dict)
+    #TODO generate a unique set of x values within the relevant x ranges.
+    np.savez(XMVU_PATH, x=t_fullIn, m=result[0], v=result[1], u=result[2])
