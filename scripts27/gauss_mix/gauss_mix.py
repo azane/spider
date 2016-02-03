@@ -10,7 +10,7 @@ XMVU_PATH = "~/GitRepo/spider/data/xmvu.npz" #file to which the xmvu data, for s
 #       and 'y' the variable for actual outputs.
 
 ##TODO command line calling structure
-#python thisfile.py <str:train.npz> <str:test.npz> <int:gaussian components> <int: ANN hidden layer size>
+#python thisfile.py <str:train.npz> <str:test.npz>
 #   where train.npz and test.npz should have two arrays, x and t.
 #   and x.shape == (s,inDims)
 #   and t.shape == (s,outDims)
@@ -159,12 +159,12 @@ def gmix_model(inCount, t, g=5, hSize=15):
     #   this section builds and returns a dictionary that can be used from outside this function to run tensorflow output and to fill placeholders.
     rDict = dict(
         
-        x=fullIn
-        t=fullOut_
-        u=mean #as in 'mew'
-        v=var
-        m=mix
-        inRange=inRange
+        x=fullIn,
+        t=fullOut_,
+        u=mean, #as in 'mew'
+        v=var,
+        m=mix,
+        inRange=inRange,
         outRange=outRange
         #TODO we'll need to return the net variables eventually so jason spiders can utilize fitted network.
     )
@@ -186,10 +186,11 @@ def gmix_nll(m, v, u, t):
     
     """
     
-    #-----<Assertions>-----
-    assert m.shape[0] == v.shape[0] and u.shape[0] == t.shape[0] and u.shape[0] == m.shape[0] #assert that s is equal across.
-    assert m.shape[1] == u.shape[1] #assert that g is equal across
-    assert v.shape[1] == u.shape[2] and v.shape[1] == t.shape[1] #assert that t is equal across
+    #-----<Assertions>----- #FIXME these have to be tf.eval() 'd to work. otherwise they stand for unique tensor operations.
+    #print str(tf.shape(m))
+    #assert tf.shape(m)[0] == tf.shape(v)[0] and tf.shape(u)[0] == tf.shape(t)[0] and tf.shape(u)[0] == tf.shape(m)[0] #assert that s is equal across.
+    #assert tf.shape(m)[1] == tf.shape(u)[1] #assert that g is equal across
+    #assert tf.shape(v)[1] == tf.shape(u)[2] and tf.shape(v)[1] == tf.shape(t)[1] #assert that t is equal across
     #-----</Assertions>-----
     
     
@@ -197,7 +198,7 @@ def gmix_nll(m, v, u, t):
 
         #prep terms of variance
         #add a dimension of 1 to be broadcast over the 'g' dimension in other tensors.
-        v = tf.expand_dims(v, 1) #now v.shape == (s, 1, t)
+        v = tf.expand_dims(v, 1) #now tf.shape(v) == (s, 1, t)
         v_norm = 1/(v*tf.sqrt(2*np.pi))
         v_dem = 2*tf.square(v)
 
@@ -251,13 +252,25 @@ def verify_xt(x, t):
     assert x.ndim == 2, "The x array must have shape (sampleSize, inputDimensions), not " % (str(x.shape))
     assert t.ndim == 2, "The t array must have shape (sampleSize, inputDimensions), not " % (str(t.shape))
     #---</Verify>---
+    
+    #---<Warn>---
+    if x.shape[0] <= x.shape[1]:
+        #TODO use the warnings module to raise a warning
+        print "WARNING: There are fewer samples than input dimensions, x is probably transposed incorectly. x.shape == %s" % (str(x.shape))
+    if t.shape[0] <= t.shape[1]:
+        #TODO use the warnings module to raise a warning
+        print "WARNING: There are fewer samples than output dimensions, t is probably transposed incorectly. t.shape == %s" % (str(t.shape))
+    #---</Warn>---
 
 def get_xt_from_npz(npz_path):
     """This function reads an npz file, verifies xt, and returns the unpacked arrays."""
     
     with np.load(npz_path, allow_pickle=False) as xt:
         x = xt['x']
-        t = xt['t']
+        try:
+            t = xt['t']
+        except KeyError:
+            t = xt['y'] #try under y.
     
     verify_xt(x, t)
     
@@ -274,12 +287,12 @@ def infer_ranges(x, t):
     inDims, outDims = infer_space(x, t)
     
     inRange = []
-    for d in range(inDims):
+    for d in range(inDims): #-1 for count vs. index
         inRange.append([x[:,d].min(), x[:,d].max()]) #get the min/max over all samples for each input dimension.
     
     outRange = []
     for d in range(outDims):
-        inRange.append([t[:,d].min(), t[:,d].max()])
+        outRange.append([t[:,d].min(), t[:,d].max()])
     #----</Infer Ranges>----
     
     return np.array(inRange), np.array(outRange) #convert to np.array and return
@@ -303,7 +316,7 @@ def gmix_training_model(inDims, outDims):
     #collect mvut placeholders from model for loss function.
     m, v, u, t = modelDict['m'], modelDict['v'], modelDict['u'], modelDict['t']
     with tf.name_scope('loss') as scope:
-        loss = mixture_negative_log_likelihood(m, v, u, t)
+        loss = gmix_nll(m, v, u, t)
     
     #train
     with tf.name_scope('train_step') as scope:
@@ -356,15 +369,15 @@ if __name__ == "__main__":
     #----</Training Constants>----
     
     #----<Training Setup>----
-    inDims, outDims = infer_space(x, t) #get info to build model
+    inDims, outDims = infer_space(s_x, s_t) #get info to build model
     modelDict = gmix_training_model(inDims, outDims) #build model, get dict of tensorflow placeholders, variables, outputs, etc.
     
-    inRange, outRange = infer_ranges(x, t) #infer ranges for feed dict
+    inRange, outRange = infer_ranges(s_x, s_t) #infer ranges for feed dict
     feed_dict = {
-                    modelDict['x']=None,
-                    modelDict['t']=None,
-                    modelDict['inRange']=inRange,
-                    modelDict['outRange']=outRange
+                    modelDict['x']:None,
+                    modelDict['t']:None,
+                    modelDict['inRange']:inRange,
+                    modelDict['outRange']:outRange
                 } #build feed dict, but leave x and t empty, as they will be updated in the training loops.
     #----</Training Setup>----
     
@@ -372,80 +385,18 @@ if __name__ == "__main__":
     for i in ITERATIONS:
         if i % 10 == 0: #run reports every 10 iterations.
             feed_dict[modelDict['x']], feed_dict[modelDict['t']] = sample_batch(t_x, t_t, TEST_BATCH_SIZE) #update feed_dict with test batch
-            result = modelDict['sess'].run([modelDict['summaries'], modelDict['loss']]) #run model with test batch
+            result = modelDict['sess'].run([modelDict['summaries'], modelDict['loss']], feed_dict=feed_dict) #run model with test batch
             modelDict['summaryWriter'].add_summary(result[0], i) #write to summary
             print("Loss at step %s: %s" % (i, result[1])) #print loss
         else:
             #update feed_dict with test batch #update feed_dict with training batch
             feed_dict[modelDict['x']], feed_dict[modelDict['t']] = sample_batch(s_x, s_t, TRAIN_BATCH_SIZE)
-            result = modelDict['sess'].run([modelDict['summaries'], modelDict['loss']]) #run model with test batch #run model with training batch
-        
+            result = modelDict['sess'].run([modelDict['summaries'], modelDict['loss']], feed_dict=feed_dict) #run model with training batch
+    #----<Training Loop>----
+    
     #----<Store for Sampling>----
     feed_dict[modelDict['x']], feed_dict[modelDict['t']] = t_x, t_t #update feed_dict with full test data batch
-    result = sess.run([modelDict['mix'], modelDict['var'], modelDict['mean']], feed_dict=f_dict) #evaluate the trained model at m, v, and u with the test data.
+    #evaluate the trained model at m, v, and u with the test data.
+    result = modelDict['sess'].run([modelDict['m'], modelDict['v'], modelDict['u']], feed_dict=feed_dict)
     np.savez(XMVU_PATH, x=t_x, m=result[0], v=result[1], u=result[2]) #write this to an npz file for later sampling
     #----</Store for Sampling>----
-
-def old_delete_me():
-    #training loop
-    for i in range(300):
-
-        if i % 20 == 0:
-            f_dict = {
-                        fullIn:t_fullIn[s_i],
-                        inRange:f_inRange,
-                        outRange:f_outRange,
-                        fullOut_:t_fullOut_[s_i]
-                    
-                        #overfitting test:
-                        #fullIn:f_fullIn[s_i],
-                        #fullOut_:f_fullOut_[s_i]
-                    }
-
-            result = sess.run([merged, loss, mean], feed_dict=f_dict)
-            summary_str = result[0]
-            test_loss = result[1]
-            writer.add_summary(summary_str, i)
-            #writer.flush()
-        
-            #---<Make more flexible with range>----
-            sampleSize = result[2].shape[0]
-            viewSize = 20
-            manualRange = 1
-        
-            test_means = result[2][0:sampleSize:int(sampleSize/viewSize)]
-            test_targets = np.expand_dims(t_fullOut_[s_i][0:sampleSize:int(sampleSize/viewSize)], 1)
-            test_diff = np.abs(test_targets - test_means)
-            test_best_mean_diff = np.amin(test_diff, axis=1)
-            test_avg_diff = np.mean(test_best_mean_diff)
-            #----</MMFWR>----
-        
-            print("Loss at step %s: %s" % (i, test_loss))
-            #<MMFWR>
-            print("Average target distance from best mean as percentage of range at step %s: %s" % (i, test_avg_diff/manualRange))
-            #</MMFWR
-            print "--------"
-
-        else:
-            s_i = np.random.random_integers(0, high=f_fullIn.shape[0]-1, size=1)
-            f_dict = {
-                        fullIn:f_fullIn[s_i],
-                        inRange:f_inRange,
-                        outRange:f_outRange,
-                        fullOut_:f_fullOut_[s_i]
-                    }
-
-            sess.run(train_step, feed_dict=f_dict)
-
-
-
-    #write x, m, v, and u to a .npy file for later sampling.
-    f_dict = {
-                fullIn:t_fullIn,
-                inRange:f_inRange,
-                outRange:f_outRange,
-                fullOut_:t_fullOut_
-            }
-    result = sess.run([mix, var, mean], feed_dict=f_dict)
-    #TODO generate a unique set of x values within the relevant x ranges.
-    np.savez(XMVU_PATH, x=t_fullIn, m=result[0], v=result[1], u=result[2])
