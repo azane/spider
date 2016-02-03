@@ -8,6 +8,15 @@ import matplotlib.animation as animation
 import numpy as np
 import sys
 
+"""called from command line
+the .npz file referenced should be...an .npz file...
+and should have two arrays. x.shape == (s,inputdimensions) and y.shape == (s,outputdimensions)
+#also must use frameworkpython on osx, this command can be set up in the .bashrc file if using a virtualenv. see matplotlib faq for details.
+
+terminal e.g.: frameworkpython thisfile.py data.npz"""
+
+#TODO create an "if main" clause so this can be used and imported.
+
 def scale(x, index, low, high):
     #return an array after discarding points outside of the range.
     return x[:,(x[index]>low) & (x[index]<high)]#select column indices within the range.
@@ -46,7 +55,8 @@ y = xy['y']
 
 print x.shape, y.shape
 
-assert x.shape[0] == y.shape[0], "x and y have a different number of points!"
+assert x.shape[0] == y.shape[0], "x and y have a different number of points!" #check sample size.
+
 
 #cull data to a set number of points.
 lim = 1500
@@ -56,6 +66,7 @@ if x.shape[0] > lim:
     y = y[randRows, :]
 
 for t in range(y.shape[1]):
+    #x is only transposed so x.shape == (inputdimensions, s), while each y output is taken so y.shape == (s,)
     init2d(np.squeeze(x.transpose()), np.squeeze(y[:,t])) #select single output, transpose x to match now that y is a 1d row of shape (s,)
 
 plt.show()

@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+import sys
 
 ##TODO command line calling structure
 #python thisfile.py <str:x.csv> <str:t.csv> <int:gaussian components> <int: ANN hidden layer size>
@@ -184,12 +185,14 @@ def mixture_negative_log_likelihood(m, v, u, t):
 
 
 #----<Read Data>----
-#dataRaw = np.genfromtxt('data/full_with_n.csv', delimiter=',')
-sampleRaw = np.genfromtxt('data/sample.csv', delimiter=',')
-testRaw = np.genfromtxt('data/test.csv', delimiter=',')
+with np.load(sys.argv[1], allow_pickle=False) as data:
+    sampleRaw = data['s']
+    testRaw = data['t']
 
 
 #t for test, f for feed
+#in.shape == [s,x]
+#out.shape == [s,t]
 t_fullIn = np.expand_dims(testRaw[:,0], 0).transpose()
 t_fullOut_ = np.expand_dims(testRaw[:,1], 0).transpose()
 

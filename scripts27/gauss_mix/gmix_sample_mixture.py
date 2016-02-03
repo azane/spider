@@ -3,6 +3,13 @@ import numpy as np
 import tensorflow as tf
 
 
+"""terminal syntax
+
+: python thisfile.py xmvuinfile.npz sampleoutfile.npz
+
+the xmvu file must have 4 arrays labeled x, m, v, and u, and must meet the asserted requirements in the sample_mixture function.
+"""
+
 def sample_mixture(x, m, v, u):
     #x - the inputs [s,x] #these are strictly used to pair with the returned outputs.
     #u - the mean [s,g,t]
