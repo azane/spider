@@ -2,8 +2,8 @@ import tensorflow as tf
 import numpy as np
 import sys
 
-SUMMARY_DIRECTORY = "~/GitRepo/spider/data/gauss_mix_logs" #directory in which summary files are stored
-XMVU_PATH = "~/GitRepo/spider/data/xmvu.npz" #file to which the xmvu data, for sampling is written after training.
+SUMMARY_DIRECTORY = "/Users/azane/GitRepo/spider/data/gauss_mix_logs" #directory in which summary files are stored
+XMVU_PATH = "/Users/azane/GitRepo/spider/data/xmvu.npz" #file to which the xmvu data, for sampling is written after training.
 
 
 #TODO throughout this project, make 't' be the variable for training targets, i.e. ideal outputs
@@ -25,7 +25,7 @@ XMVU_PATH = "~/GitRepo/spider/data/xmvu.npz" #file to which the xmvu data, for s
 
 def weight_variable(shape):
     """This returns a randomized weight matrix"""
-    initial = tf.truncated_normal(shape, stddev=0.1)
+    initial = tf.truncated_normal(shape, stddev=0.5)
     return tf.Variable(initial)
 
 def bias_variable(shape):
@@ -62,6 +62,7 @@ def gmix_model(inCount, t, g=5, hSize=15):
     """
     
     #TODO make g and hSize defaults a function of data complexity? or maybe have them be learned as well.
+    #TODO FIXME make naming in this function consistent with the rest of the project.
     
 
     #-----<Placeholder Construction>-----
@@ -141,8 +142,8 @@ def gmix_model(inCount, t, g=5, hSize=15):
 
     with tf.name_scope('massage_var') as scope:
         #variances
-        #FIXME TODO we may want to make this a function of the range of the target for which this variance will be used.
-        var = tf.exp(tf.mul(varRaw, 2)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
+        #varScale = tf.Variable(2.0) #TODO is this a good idea?
+        var = tf.exp(tf.mul(varRaw, 2.0)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
 
     with tf.name_scope('massage_mean') as scope:
         #mean
@@ -158,15 +159,16 @@ def gmix_model(inCount, t, g=5, hSize=15):
     #-----<Build Reference Dict>-----
     #   this section builds and returns a dictionary that can be used from outside this function to run tensorflow output and to fill placeholders.
     rDict = dict(
-        
         x=fullIn,
         t=fullOut_,
         u=mean, #as in 'mew'
         v=var,
         m=mix,
         inRange=inRange,
-        outRange=outRange
-        #TODO we'll need to return the net variables eventually so jason spiders can utilize fitted network.
+        outRange=outRange,
+        netIn=netIn,
+        mixRaw=mixRaw,
+        varRaw=varRaw
     )
     
     return rDict
@@ -320,7 +322,9 @@ def gmix_training_model(inDims, outDims):
     
     #train
     with tf.name_scope('train_step') as scope:
-        train_step = tf.train.GradientDescentOptimizer(0.01).minimize(loss)
+        optimizer = tf.train.GradientDescentOptimizer(0.01)
+        gradients = optimizer.compute_gradients(loss)
+        train_step = optimizer.minimize(loss)
     
     #init session
     sess = tf.Session()
@@ -338,6 +342,8 @@ def gmix_training_model(inDims, outDims):
     modelDict['summaryWriter']=writer
     modelDict['train_step']=train_step
     modelDict['loss']=loss
+    modelDict['gradients']=gradients
+    modelDict['train_step']=train_step
     
     return modelDict
 
@@ -383,20 +389,52 @@ if __name__ == "__main__":
     
     #----<Training Loop>----
     for i in ITERATIONS:
+        
+        #<TEMP>
+        #TODO compare previous gradients with change in values to see if they line up.
+        prevGradients None
+        prevValues = None
+        #</TEMP>
+        
         if i % 10 == 0: #run reports every 10 iterations.
             feed_dict[modelDict['x']], feed_dict[modelDict['t']] = sample_batch(t_x, t_t, TEST_BATCH_SIZE) #update feed_dict with test batch
-            result = modelDict['sess'].run([modelDict['summaries'], modelDict['loss']], feed_dict=feed_dict) #run model with test batch
+            
+            result = modelDict['sess'].run([
+                                            modelDict['summaries'],
+                                            modelDict['loss']
+                                        ], feed_dict=feed_dict) #run model with test batch
+            
+            #<TEMP>
+            gradients = modelDict['sess'].run(modelDict['gradients'][4], feed_dict=feed_dict)
+            #</TEMP>
+            
             modelDict['summaryWriter'].add_summary(result[0], i) #write to summary
             print("Loss at step %s: %s" % (i, result[1])) #print loss
+            
+            #<TEMP>
+            print 'Gradients: '
+            print gradients[0]
+            print 'Values: '
+            print gradients[1]
+            #</TEMP>
+            
+            print '-------------------------------'
+            
         else:
-            #update feed_dict with test batch #update feed_dict with training batch
+            #update feed_dict with training batch
             feed_dict[modelDict['x']], feed_dict[modelDict['t']] = sample_batch(s_x, s_t, TRAIN_BATCH_SIZE)
-            result = modelDict['sess'].run([modelDict['summaries'], modelDict['loss']], feed_dict=feed_dict) #run model with training batch
+            modelDict['sess'].run([
+                                    modelDict['train_step']
+                                ], feed_dict=feed_dict) #run train_step with training batch
     #----<Training Loop>----
     
     #----<Store for Sampling>----
     feed_dict[modelDict['x']], feed_dict[modelDict['t']] = t_x, t_t #update feed_dict with full test data batch
     #evaluate the trained model at m, v, and u with the test data.
-    result = modelDict['sess'].run([modelDict['m'], modelDict['v'], modelDict['u']], feed_dict=feed_dict)
+    result = modelDict['sess'].run([
+                                    modelDict['m'],
+                                    modelDict['v'],
+                                    modelDict['u']
+                                ],feed_dict=feed_dict)
     np.savez(XMVU_PATH, x=t_x, m=result[0], v=result[1], u=result[2]) #write this to an npz file for later sampling
     #----</Store for Sampling>----

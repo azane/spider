@@ -62,8 +62,8 @@ assert x.shape[0] == y.shape[0], "x and y have a different number of points!" #c
 lim = 1500
 if x.shape[0] > lim:
     randRows = np.random.randint(x.shape[0],size=1500)
-    x = x[randRows, :]
-    y = y[randRows, :]
+    x = x[randRows]#, :]
+    y = y[randRows]#, :]
 
 for t in range(y.shape[1]):
     #x is only transposed so x.shape == (inputdimensions, s), while each y output is taken so y.shape == (s,)
