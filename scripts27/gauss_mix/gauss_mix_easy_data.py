@@ -277,3 +277,16 @@ for i in range(300):
                 }
 
         sess.run(train_step, feed_dict=f_dict)
+
+
+
+#write x, m, v, and u to a .npy file for later sampling.
+f_dict = {
+            fullIn:t_fullIn,
+            inRange:f_inRange,
+            outRange:f_outRange,
+            fullOut_:t_fullOut_
+        }
+result = sess.run([mix, var, mean], feed_dict=f_dict)
+#TODO generate a unique set of x values within the relevant x ranges.
+np.savez('data/xmvu', x=t_fullIn, m=result[0], v=result[1], u=result[2])
