@@ -6,22 +6,53 @@ SUMMARY_DIRECTORY = "/Users/azane/GitRepo/spider/data/gauss_mix_logs" #directory
 XMVU_PATH = "/Users/azane/GitRepo/spider/data/xmvu.npz" #file to which the xmvu data, for sampling is written after training.
 
 
+
+
+"""brainstorming
+with the visualization implementation, we're going to need to clean this file up, and put it in a class probably.
+
+one file with visualization functions
+
+one file with the gmix class. this will need to make new graphs/sessions on __init__,
+    and it will need a flag to tell if and what summaries/reporting structure to use
+
+one file that functions as the command line face, i.e. remove the main clause, and put it in another file that handles iterations and stuff, but in functions.
+    perhaps this should function as the api face of the gmix model too?
+
+
+CRITICAL PATH:
+1. move the main section to another file and seperate it into functions, callable from the main bit, but useable from elsewhere.
+2. do some cleaning on the gmix file, and organize it into a class. implement the graph/session inits and report flags.
+3. write the visualization file and add tensorflow debugger functionality to the gmix file.
+"""
+
 #TODO throughout this project, make 't' be the variable for training targets, i.e. ideal outputs
 #       and 'y' the variable for actual outputs.
 
-##TODO command line calling structure
-#python thisfile.py <str:train.npz> <str:test.npz>
-#   where train.npz and test.npz should have two arrays, x and t.
-#   and x.shape == (s,inDims)
-#   and t.shape == (s,outDims)
-#train and test should obviously be different sets data from the same source.
+"""
+command line calling structure
+:python thisfile.py <str:train.npz> <str:test.npz>
+   where train.npz and test.npz should have two arrays, x and t.
+   and x.shape == (s,inDims)
+   and t.shape == (s,outDims)
+train and test should obviously be different sets of data from the same source.
 
+"""
 
 #TODO make this a class that inits graphs/sessions for each new instance. this will be required to have lots of jasons running their own graphs.
 #       or lots of jasons calling to the same server to run their data and return their weight matrices.
 #     we'll also need to control which instances get summaries written for them. just with a flag probs.
 
 #TODO make the variable naming more consistent throughout functions. it's confusing...slash, that may come with making it a class.
+
+#TODO where possible, convert range conversions to this process:
+#   data -= data.min() #make 0 base
+#   data /= data.max() #divide by maximum
+#   data *= 2 #multiply 0-1 range for [0,2] range
+#   data -= 1 #subtract one to shift for [-1,1] range.
+#   #FIXME actually, this may not work very well, because a sample batch may not capture the range the spider decides it wants to search over. : /
+#   #       but i'm still overcomplicating the math. this is better.
+#   #FIXME also, to expand the range back out, it needs to remember it...so maybe my current method is so far gone?
 
 def weight_variable(shape):
     """This returns a randomized weight matrix"""
@@ -390,12 +421,6 @@ if __name__ == "__main__":
     #----<Training Loop>----
     for i in ITERATIONS:
         
-        #<TEMP>
-        #TODO compare previous gradients with change in values to see if they line up.
-        prevGradients None
-        prevValues = None
-        #</TEMP>
-        
         if i % 10 == 0: #run reports every 10 iterations.
             feed_dict[modelDict['x']], feed_dict[modelDict['t']] = sample_batch(t_x, t_t, TEST_BATCH_SIZE) #update feed_dict with test batch
             
@@ -404,19 +429,8 @@ if __name__ == "__main__":
                                             modelDict['loss']
                                         ], feed_dict=feed_dict) #run model with test batch
             
-            #<TEMP>
-            gradients = modelDict['sess'].run(modelDict['gradients'][4], feed_dict=feed_dict)
-            #</TEMP>
-            
             modelDict['summaryWriter'].add_summary(result[0], i) #write to summary
             print("Loss at step %s: %s" % (i, result[1])) #print loss
-            
-            #<TEMP>
-            print 'Gradients: '
-            print gradients[0]
-            print 'Values: '
-            print gradients[1]
-            #</TEMP>
             
             print '-------------------------------'
             
