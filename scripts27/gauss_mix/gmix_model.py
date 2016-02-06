@@ -18,7 +18,7 @@ one file that functions as the command line face, i.e. remove the main clause, a
 
 
 CRITICAL PATH:
-1. move the main section to another file and seperate it into functions, callable from the main bit, but useable from elsewhere.
+1. move the main section to another file and separate it into functions, callable from the main bit, but useable from elsewhere.
 2. do some cleaning on the gmix file, and organize it into a class. implement the graph/session inits and report flags.
 3. write the visualization file and add tensorflow debugger functionality to the gmix file.
 """
@@ -74,6 +74,11 @@ class GaussianMixtureModel(object):
         self._verify_xt(x, t)
         self._verify_xt(x_test, t_test)
         
+        self.x = x
+        self.t = t
+        self.x_test = x_test
+        self.t_test = t_test
+        
         if inDims is None:
             self.inDims = self._infer_space(x)[0]
         if outDims is None:
@@ -92,6 +97,8 @@ class GaussianMixtureModel(object):
         #this is a reference dictionary where tensorflow tensor objects are stored.
         #   it's basically employed to keep the class namespace cleaner, cz there can be looots of tensors.
         self.refDict = {}
+        
+        self.gmix_full_model()
         
     def _infer_space(self, x, t):
         """Return inferred in and out dimensions
@@ -190,7 +197,7 @@ class GaussianMixtureModel(object):
         """
         i = np.random.random_integers(0, high=x.shape[0]-1, size=size)
         return x[i], t[i]
-    def gmix_forward_model(self):
+    def _gmix_forward_model(self):
         """Build forward model and add tensors to the dict of tensorflow tensors
     
             This method builds the forward part of the tensorflow graph and returns a dict for reference.
@@ -324,7 +331,7 @@ class GaussianMixtureModel(object):
         #-----</Update Reference Dict>-----
 
 
-    def gmix_loss_nll(self):
+    def _gmix_loss_nll(self):
         """Add the negative log likelihood loss tensor to the reference dictionary
             
             This defines the nll loss function for a gaussian mixture model.
@@ -389,7 +396,7 @@ class GaussianMixtureModel(object):
         self.refDict['loss_nll'] = nll
         #-----</Update Reference Dict>-----
 
-    def gmix_training_model(self, learningRate=None):
+    def _gmix_training_model(self, learningRate=None):
         """Adds general graph tensors to reference dictionary.
         
             - builds the mixture model that takes inputs and returns, means, variances, and mixture coefficients.
@@ -433,5 +440,103 @@ class GaussianMixtureModel(object):
             rd['gradients']=gradients
             rd['train_step']=train_step
         #-----</Update Reference Dict>-----
+    def _get_refDict(self):
+        """Return the reference dictionary holding tensorflow tensors.
+        """
+        return self.refDict
+    def _massage_training_arguments(self, iterations=1000, testBatchSize=500, trainBatchSize=1000):
+        iterations = range(iterations)
         
+        #verify batch sizes
+        if self.x_test.shape[0] < testBatchSize:
+            testBatchSize = self.x_test.shape[0]
         
+        if self.x.shape[0] < trainBatchSize:
+            trainBatchSize = self.x.shape[0]
+        
+        return iterations, testBatchSize, trainBatchSize
+        
+    def train(self, iterations, testBatchSize, trainBatchSize):
+        
+        iterations, testBatchSize, trainBatchSize = self._massage_training_arguments(iterations, testBatchSize, trainBatchSize)
+        
+        #build feed dict, but leave x and t empty, as they will be updated in the training loop.
+        feed_dict = {
+                        self.refDict['x']:None,
+                        self.refDict['t']:None,
+                        self.refDict['inRange']:self.inRange,
+                        self.refDict['outRange']:self.outRange
+                    }
+                    
+        #----<Training Loop>----
+        for i in iterations:
+            
+            if i % 10 == 0: #run reports every 10 iterations.
+                #update feed_dict with test batch
+                feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x_test, self.t_test, testBatchSize)
+                
+                result = self.refDict['sess'].run([
+                                                self.refDict['summaries'],
+                                                self.refDict['loss']
+                                            ], feed_dict=feed_dict) #run model with test batch
+                                            
+                self.refDict['summaryWriter'].add_summary(result[0], i) #write to summary
+                print("Loss at step %s: %s" % (i, result[1])) #print loss
+                
+                print '-------------------------------'
+                
+            else:
+                #update feed_dict with training batch
+                feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x, self.t, trainBatchSize)
+                self.refDict['sess'].run([
+                                        self.refDict['train_step']
+                                    ], feed_dict=feed_dict) #run train_step with training batch
+        #----<Training Loop>----
+    def get_xmvu(self):
+        #update feed_dict with full test data batch
+        feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self.x_test, self.t_test
+        #evaluate the trained model at m, v, and u with the test data.
+        result = self.refDict['sess'].run([
+                                        self.refDict['m'],
+                                        self.refDict['v'],
+                                        self.refDict['u']
+                                    ],feed_dict=feed_dict)
+        return result[0], result[1], result[2] #m, v, u
+    def get_write_xmvu(self, path):
+        m, v, u = self.get_xmvu()
+        
+        np.savez(path, x=self.t_test, m=m, v=v, u=u) #write this to an npz file for later sampling
+
+    def _gmix_full_model(self):
+        self.gmix_forward_model()
+        self.gmix_loss_nll()
+        self.gmix_training_model()
+#
+#----------------------------------------------------------------<MAIN>----------------------------------------------------------------
+
+"""
+command line calling structure
+:python thisfile.py <str:train.npz> <str:test.npz>
+   where train.npz and test.npz should have two arrays, x and t.
+   and x.shape == (s,inDims)
+   and t.shape == (s,outDims)
+train and test should obviously be different sets of data from the same source.
+
+"""
+
+XMVU_PATH = "/Users/azane/GitRepo/spider/data/xmvu.npz" #file to which the xmvu data, for sampling is written after training.
+
+if __name__ == "__main__":
+    #TODO TODO split up this main section. make a function that can be called just with x and t array values
+    #       cz the only reason to really use the command line is to read from a file...so that's really the only thing we need in the main section.
+    
+    #----<Read Data>----
+    #t for test, s for training sample
+    s_x, s_t = get_xt_from_npz(sys.argv[1])
+    t_x, t_t = get_xt_from_npz(sys.argv[2])
+    #----</Read Data>----
+    
+    gmm = GaussianMixtureModel(s_x, s_t, t_x, t_t)
+    gmm.train()
+    gmm.get_write_xmvu()
+    
