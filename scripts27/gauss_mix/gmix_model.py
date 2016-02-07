@@ -315,9 +315,14 @@ class GaussianMixtureModel(object):
         #-----</Massage for Gaussian Mixture>-----
         
         #-----<Update Reference Dict>-----
+        
+        #FIXME this is a workaround for x retrievals that say, "fed and fetched, you suck"
+        fetchX = ((.5 + (netIn/2)) * (eROutT-eROutB)) + eROutB  # expand from tanh
+        
         #this section updates the instance dictionary that can be used from outside to run tensorflow output and to fill placeholders.
         rd = self.refDict
         rd['x']=fullIn
+        rd['fetchX']=fetchX
         rd['t']=fullOut_
         rd['u']=mean  # as in 'mew'
         rd['v']=var
@@ -460,18 +465,35 @@ class GaussianMixtureModel(object):
         """
         nodeList = []
         
-        #NOTE everything in inputs must be a tensor in this session's graph!
-        #e.g. : p1=tdb.plot_op(viz.viz_conv_weights,inputs=[g.as_graph_element(conv1_weights)])
-        p_xm = tdb.plot_op(viz.x1_g, inputs=[
-                                                self.graph.as_graph_element(self.refDict['netIn']),
+        #mixing coefficients full update
+        p_xm = tdb.plot_op(viz.mixing_coefficients, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['m'])
                                             ])
         nodeList.append(p_xm)
         
+        #variances full update
+        p_xv = tdb.plot_op(viz.variances, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['v'])
+                                            ])
+        nodeList.append(p_xv)
+        
+        #loss over iterations
         p_loss = tdb.plot_op(viz.watch_loss, inputs=[
                                                 self.graph.as_graph_element(self.refDict['loss_nll'])
                                             ])
         nodeList.append(p_loss)
+        
+        #full 2d sampling of model.
+        p_sample = tdb.plot_op(viz.sample, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['m']),
+                                                self.graph.as_graph_element(self.refDict['v']),
+                                                self.graph.as_graph_element(self.refDict['u'])
+                                            ])
+        nodeList.append(p_sample)
+        
         
         self.refDict['tdb_nodes'] = nodeList
     

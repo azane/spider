@@ -26,27 +26,55 @@ we need to visualize:
 """
 import matplotlib.pyplot as plt
 import numpy as np
-import gmix_sample_mixture
+import gmix_sample_mixture as smpl
 
+#----<helper functions>----
+def sort_by_x(x, y):
+    #TODO FIXME this only works if x and y are 1D! y needs to be sorted across 2D. mfj38dl
+    xy = np.column_stack((x,y))  # stack horizontally
+    xy = xy[xy[:,0].argsort()]  # sort by the x column
+    return xy[:,0], xy[:,1]  # re-separate x and y
 
-def x1_g(ctx, x, g, yLabel='Mixing Coefficients'):
-    #x.shape == [s,x]
-    #g.shape == [s,g]
-    #TODO plot an arbitrary number of mixing lines.
-    print('g[:,0].shape: ' + str(g[:,0].shape))
-    plt.plot(x[:,0], g[:,0])
-    plt.xlabel('Input Range')
+def x1_y1(x, y, xLabel='', yLabel='', title=''): #TODO rename when mfj38dl is fixed.
+    
+    x = x[:,0]
+    y = y[:,0]#TEMP #TODO plot an arbitrary number of y lines. mfj38dl
+    
+    x, y = sort_by_x(x, y)
+    plt.plot(x, y)
+    plt.xlabel(xLabel)
     plt.ylabel(yLabel)
+    plt.title(title)
+    
+#----</helper functions>----
 
-def x1_t(ctx, x, t):
+
+#----<CTX functions>----
+def mixing_coefficients(ctx, x, g):
+    x1_y1(x, g, xLabel='Input Range', yLabel='Relevance', title='Mixing Coefficients over X')
+    
+def means(ctx, x, u):
+    #x.shape == [s,x]
+    #u.shape == [s,g,u]
     pass
+
+def variances(ctx, x, v):
+    x1_y1(x, v, xLabel='Input Range', yLabel='Standard Deviation', title='Standard Deviation over X')
+
+def sample(ctx, x, m, v, u):
+    x, y = smpl.sample_mixture(x, m, v, u)
+    plt.scatter(x, y)
+    plt.title('Sampling of GMM')
 
 def x1_g_t(ctx, x, g, t):
     pass
 
 def watch_loss(ctx, loss):
-  if not hasattr(ctx, 'loss_history'):
-    ctx.loss_history=[]
-  ctx.loss_history.append(loss)
-  plt.plot(ctx.loss_history)
-  plt.ylabel('Loss')
+    #snagged from tdb viz example file.
+    if not hasattr(ctx, 'loss_history'):
+        ctx.loss_history=[]
+    ctx.loss_history.append(loss)
+    plt.plot(ctx.loss_history)
+    plt.ylabel('Loss')
+#----</CTX functions>----
+
