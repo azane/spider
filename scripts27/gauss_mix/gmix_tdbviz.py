@@ -30,18 +30,24 @@ import gmix_sample_mixture as smpl
 
 #----<helper functions>----
 def sort_by_x(x, y):
-    #TODO FIXME this only works if x and y are 1D! y needs to be sorted across 2D. mfj38dl
+    #x and y should be 1d at this point .shape == [s,]
     xy = np.column_stack((x,y))  # stack horizontally
     xy = xy[xy[:,0].argsort()]  # sort by the x column
     return xy[:,0], xy[:,1]  # re-separate x and y
-
-def x1_y1(x, y, xLabel='', yLabel='', title=''): #TODO rename when mfj38dl is fixed.
     
-    x = x[:,0]
-    y = y[:,0]#TEMP #TODO plot an arbitrary number of y lines. mfj38dl
+def x1_yMany(x, y, xLabel='', yLabel='', title=''):
     
-    x, y = sort_by_x(x, y)
-    plt.plot(x, y)
+    #x.shape == [s,x]
+    #y.shape == [s,t/y]
+    
+    x_ = x[:,0]  # select the 1st input dimension
+    
+    #iterate the output dimensions, plotting each line with the original x values.
+    for outDim in range(y.shape[1]):
+        y_ = y[:,outDim]
+        x_, y_ = sort_by_x(x_, y_)
+        plt.plot(x_, y_)
+    
     plt.xlabel(xLabel)
     plt.ylabel(yLabel)
     plt.title(title)
@@ -51,23 +57,37 @@ def x1_y1(x, y, xLabel='', yLabel='', title=''): #TODO rename when mfj38dl is fi
 
 #----<CTX functions>----
 def mixing_coefficients(ctx, x, g):
-    x1_y1(x, g, xLabel='Input Range', yLabel='Relevance', title='Mixing Coefficients over X')
+    x1_yMany(x, g, xLabel='Input Range', yLabel='Relevance', title='Mixing Coefficients over X')
     
 def means(ctx, x, u):
     #x.shape == [s,x]
-    #u.shape == [s,g,u]
-    pass
+    #u.shape == [s,g,t]
+    
+    #graph g lines on t graphs
+    
+    #get subplot rows/cols, make rectangle as close to a square as possible
+    numSubplt = u.shape[2]
+    sideSubplt = np.sqrt(numSubplt)
+    rows = int(sideSubplt)
+    if ((sideSubplt-rows) > 0):
+        cols = rows + 1
+    else:
+        cols = rows
+    
+    #iterate t
+    #   plot g lines, then write a subplot after g's are finished.
+    for outDim in range(u.shape[2]):
+        #make plot of all g's for this subplot.
+        x1_yMany(x, u[:,:,outDim], xLabel='Input Range', yLabel='Output Range', title='Means')
+        plt.subplot(rows, cols, (outDim+1))
 
 def variances(ctx, x, v):
-    x1_y1(x, v, xLabel='Input Range', yLabel='Standard Deviation', title='Standard Deviation over X')
+    x1_yMany(x, v, xLabel='Input Range', yLabel='Standard Deviation', title='Standard Deviation over X')
 
 def sample(ctx, x, m, v, u):
     x, y = smpl.sample_mixture(x, m, v, u)
     plt.scatter(x, y)
     plt.title('Sampling of GMM')
-
-def x1_g_t(ctx, x, g, t):
-    pass
 
 def watch_loss(ctx, loss):
     #snagged from tdb viz example file.
@@ -76,5 +96,12 @@ def watch_loss(ctx, loss):
     ctx.loss_history.append(loss)
     plt.plot(ctx.loss_history)
     plt.ylabel('Loss')
+
+def lay1_overX(ctx, x, netOut):
+    x1_yMany(x, netOut, xLabel='Input Range', yLabel='ANN Layer 1', title='ANN Layer 1 over X')
+def lay2_overX(ctx, x, netOut):
+    x1_yMany(x, netOut, xLabel='Input Range', yLabel='ANN Layer 2', title='ANN Layer 2 over X')
+def netOut_overX(ctx, x, netOut):
+    x1_yMany(x, netOut, xLabel='Input Range', yLabel='ANN Output', title='ANN Output over X')
 #----</CTX functions>----
 

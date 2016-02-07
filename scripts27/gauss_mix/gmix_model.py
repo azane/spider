@@ -278,9 +278,12 @@ class GaussianMixtureModel(object):
             netIn = (2*(fullIn-eRInB)/(eRInT-eRInB)) - 1
             
             #run ANN
-            lay1 = tf.tanh( tf.matmul(netIn, w1) + b1 )
-            lay2 = tf.tanh( tf.matmul(lay1, w2) + b2 )
-            netOut = tf.tanh( tf.matmul(lay2, w3) + b3 )
+            #lay1 = tf.tanh( (tf.matmul(netIn, w1) + b1) )
+            lay1 = tf.matmul(netIn, w1) + b1
+            #lay2 = tf.tanh( (tf.matmul(lay1, w2) + b2) )
+            lay2 = tf.matmul(lay1, w2) + b2
+            #netOut = tf.tanh( (tf.matmul(lay2, w3) + b3) )
+            netOut = tf.matmul(lay2, w3) + b3
             
             #parse and shape netOut activations into coefficient arrays.
             mixRaw = tf.slice(netOut, begin=[0,0], size=[-1,g]) #.shape == [s,g]
@@ -332,6 +335,9 @@ class GaussianMixtureModel(object):
         rd['netIn']=netIn
         rd['mixRaw']=mixRaw
         rd['varRaw']=varRaw
+        rd['netOut']=netOut
+        rd['lay1']=lay1
+        rd['lay2']=lay2
         #-----</Update Reference Dict>-----
         
         
@@ -494,10 +500,38 @@ class GaussianMixtureModel(object):
                                             ])
         nodeList.append(p_sample)
         
+        #sample means
+        p_xu = tdb.plot_op(viz.means, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['u'])
+                                            ])
+        nodeList.append(p_xu)
+        
+        #lay1
+        p_lay1 = tdb.plot_op(viz.lay1_overX, inputs=[
+                                                            self.graph.as_graph_element(self.refDict['fetchX']),
+                                                            self.graph.as_graph_element(self.refDict['lay1'])
+                                                        ])
+        nodeList.append(p_lay1)
+        
+        #lay2
+        p_lay2 = tdb.plot_op(viz.lay2_overX, inputs=[
+                                                            self.graph.as_graph_element(self.refDict['fetchX']),
+                                                            self.graph.as_graph_element(self.refDict['lay2'])
+                                                        ])
+        nodeList.append(p_lay2)
+        
+        #net out
+        p_netout = tdb.plot_op(viz.netOut_overX, inputs=[
+                                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                                self.graph.as_graph_element(self.refDict['netOut'])
+                                                            ])
+        nodeList.append(p_netout)
+        
         
         self.refDict['tdb_nodes'] = nodeList
     
-    def train(self, iterations=1000, testBatchSize=500, trainBatchSize=1000):
+    def train(self, iterations=1000, testBatchSize=500, trainBatchSize=1000, reportEvery=10):
         with self.graph.as_default():
             iterations, testBatchSize, trainBatchSize = self._massage_training_arguments(iterations, testBatchSize, trainBatchSize)
             
@@ -518,14 +552,14 @@ class GaussianMixtureModel(object):
                     feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x_test, self.t_test, testBatchSize)
                     
                     evals = [
-                                self.refDict['summaries']#,
+                                #self.refDict['summaries']#,
                                 #self.refDict['loss_nll']
                             ]
                     evals.extend(self.refDict['tdb_nodes']) #extend with the list of tensorflow debugger nodes
                 
                     status, result = tdb.debug(evals, feed_dict=feed_dict, session=self.refDict['sess'])
                 
-                    self.refDict['summaryWriter'].add_summary(result[0], i) #write to summary
+                    #self.refDict['summaryWriter'].add_summary(result[0], i) #write to summary
                     #print("Loss at step %s: %s" % (i, result[1])) #print loss
                     #print '-------------------------------'
                 
