@@ -1,5 +1,3 @@
-
-
 #TODO someday, a better version of this should be integrated with the spider system, so we can see graphs in mostly real time.
 
 import matplotlib.pyplot as plt
@@ -46,7 +44,7 @@ def init3d(x, y):
 def init2d(x,y):
     assert x.ndim == 1
     assert x.shape == y.shape
-
+    
     return plt.scatter(x, y)#, s=area, c=colors, alpha=0.5)
 
 xy = np.load(sys.argv[1]) #gather 3d data split into x and y from npz passed from command line.

@@ -1,27 +1,12 @@
 import tensorflow as tf
 import numpy as np
 import sys
+from gmix_sample_mixture import sample_mixture
+import gmix_tdbviz as viz
+import tdb as tdb
 
 SUMMARY_DIRECTORY = "/Users/azane/GitRepo/spider/data/gauss_mix_logs" #directory in which summary files are stored
 
-
-"""brainstorming
-with the visualization implementation, we're going to need to clean this file up, and put it in a class probably.
-
-one file with visualization functions
-
-one file with the gmix class. this will need to make new graphs/sessions on __init__,
-    and it will need a flag to tell if and what summaries/reporting structure to use
-
-one file that functions as the command line face, i.e. remove the main clause, and put it in another file that handles iterations and stuff, but in functions.
-    perhaps this should function as the api face of the gmix model too?
-
-
-CRITICAL PATH:
-1. move the main section to another file and separate it into functions, callable from the main bit, but useable from elsewhere.
-2. do some cleaning on the gmix file, and organize it into a class. implement the graph/session inits and report flags.
-3. write the visualization file and add tensorflow debugger functionality to the gmix file.
-"""
 #-----<Helper Functions>-----
 def get_xt_from_npz(npz_path):
     """Return x and t
@@ -41,6 +26,15 @@ def get_xt_from_npz(npz_path):
 
     return x, t
 #-----</Helper Functions>-----
+
+"""brainstorming for time series tdb
+keep a pile of np.array 1d objects that get data appended to them when the process runs.
+feed these arrays, into the debug session, into the placeholders that are graphed by tdb plot ops.
+the debug session will then take the data from the placeholders, and return evaluated plot ops, ready for graphing.
+
+we should keep a dictionary of these placeholders, and extend the feed dictionary, automatically defining stuff, when it gets plugged into the debug session.
+
+"""
 
 class GaussianMixtureModel(object):
     def TODOsFIXMEs():
@@ -68,37 +62,43 @@ class GaussianMixtureModel(object):
         
     def __init__(self, x, t, x_test, t_test, inDims=None, outDims=None, inRange=None, outRange=None, numGaussianComponents=5, hiddenLayerSize=15, learningRate=0.01):
         
-        #-----<Attribute Processing>-----
-        #TODO allow '*_test' to be None
-        #       in that case, generate a sample test batch of 'test_size' and separate it from x and t used for training.
-        self._verify_xt(x, t)
-        self._verify_xt(x_test, t_test)
+        self.graph = tf.Graph()
+        #set this graph as default for every public function that uses tensorflow.
+        with self.graph.as_default():
         
-        self.x = x
-        self.t = t
-        self.x_test = x_test
-        self.t_test = t_test
+            #-----<Attribute Processing>-----
+            #TODO allow '*_test' to be None
+            #       in that case, generate a sample test batch of 'test_size' and separate it from x and t used for training.
+            self._verify_xt(x, t)
+            self._verify_xt(x_test, t_test)
         
-        if inDims is None:
-            self.inDims = self._infer_space(x)[0]
-        if outDims is None:
-            self.outDims = self._infer_space(t)[1]
+            self.x = x
+            self.t = t
+            self.x_test = x_test
+            self.t_test = t_test
         
-        if inRange is None:
-            self.inRange = self._infer_ranges(x, t)[0]
-        if outRange is None:
-            self.outRange = self._infer_ranges(x, t)[1]
+            if inDims is None:
+                self.inDims = self._infer_space(x, t)[0]
+            if outDims is None:
+                self.outDims = self._infer_space(x, t)[1]
         
-        self.numGaussianComponents = numGaussianComponents
-        self.hiddenLayerSize = hiddenLayerSize
-        self.learningRate = learningRate
-        #-----</Attribute Processing>-----
+            if inRange is None:
+                self.inRange = self._infer_ranges(x, t)[0]
+            if outRange is None:
+                self.outRange = self._infer_ranges(x, t)[1]
         
-        #this is a reference dictionary where tensorflow tensor objects are stored.
-        #   it's basically employed to keep the class namespace cleaner, cz there can be looots of tensors.
-        self.refDict = {}
+            self.numGaussianComponents = numGaussianComponents
+            self.hiddenLayerSize = hiddenLayerSize
+            self.learningRate = learningRate
+            #-----</Attribute Processing>-----
         
-        self.gmix_full_model()
+            #this is a reference dictionary where tensorflow tensor objects are stored.
+            #   it's basically employed to keep the class namespace cleaner, cz there can be looots of tensors.
+            self.refDict = {}
+        
+            self._gmix_training_model()
+            
+            self._tdb_nodes()
         
     def _infer_space(self, x, t):
         """Return inferred in and out dimensions
@@ -144,18 +144,17 @@ class GaussianMixtureModel(object):
         """
         #----<Infer Ranges>----
         #can this be done without loops? it doesn't happen often, so it's probs nbd. and the loops are small.
-        inDims, outDims = infer_space(x, t)
         
         inRange = []
-        for d in range(inDims):
+        for d in range(self.inDims):
             inRange.append([x[:,d].min(), x[:,d].max()]) #get the min/max over all samples for each input dimension.
             
         outRange = []
-        for d in range(outDims):
+        for d in range(self.outDims):
             outRange.append([t[:,d].min(), t[:,d].max()])
         #----</Infer Ranges>----
         
-        return np.array(inRange), np.array(outRange)  # convert from list
+        return np.array(inRange, dtype=np.float32), np.array(outRange, dtype=np.float32)  # convert from list
         
     def _weight_variable(self, shape):
         """Return weight matrix
@@ -209,7 +208,7 @@ class GaussianMixtureModel(object):
             'g' is the number of gaussian components to employ
             'hiddenLayerSize' is the size of the hidden layers of the ANN
         """
-    
+        
         #TODO make g and hiddenLayerSize defaults a function of data complexity? or maybe have them be learned as well.
         
         #TODO FIXME make naming in this function consistent with the rest of the project.
@@ -217,125 +216,125 @@ class GaussianMixtureModel(object):
         #                   and used in computation. #update: just use the instance variable, self.numGaussianComponents
         #               change fullIn and fullOut_ names to x and t.
         #               change mix, mean, and var to their single letter names. m, u, and v.
-    
+        
         #TODO this was a conversion from an independent function, so just use the instance attributes directly in this method.
         inDims = self.inDims
         outDims = self.outDims
         g = self.numGaussianComponents
         hiddenLayerSize = self.hiddenLayerSize
         
-
+        
         #-----<Placeholder Construction>-----
         outCount = g + outDims + (g*outDims) #for ANN
-
-        fullIn = tf.placeholder("float", shape=[None, inDims], name='x_val') #None allows a variable amount of rows, samples in this case
-
-        fullOut_ = tf.placeholder("float", shape=[None, outDims], name='t_val') #for gaussian mixture
-
-
+        
+        fullIn = tf.placeholder(tf.float32, shape=[None, inDims], name='x_val') #None allows a variable amount of rows, samples in this case
+        
+        fullOut_ = tf.placeholder(tf.float32, shape=[None, outDims], name='t_val') #for gaussian mixture
+        
+        
         #data ranges for elementwise conversion
         #[ [rb, rt]
         #  [rb, rt] ]
         inRange = tf.placeholder("float", shape=[inDims,2], name="inRange") #2 columns, rtop, rbot
         outRange = tf.placeholder("float", shape=[outDims,2], name="outRange")
-
+        
         # get and convert range matrices for massaging
-        eRInB, eRInT = shape_range_for_elementwise(inRange, rank=2)
-        eROutB, eROutT= shape_range_for_elementwise(outRange, rank=3)
-    
+        eRInB, eRInT = self._shape_range_for_elementwise(self.inRange, rank=2)
+        eROutB, eROutT= self._shape_range_for_elementwise(self.outRange, rank=3)
+        
         #summary ops
         x_hist = tf.histogram_summary("x", fullIn)
         t_hist = tf.histogram_summary("t", fullOut_)
         #-----</Placeholder Construction>-----
-
-
+        
+        
         #-----<ANN Construction>-----
         with tf.name_scope('ANN_const') as scope:
             #two hidden layers
-
-            w1 = weight_variable([inDims, hiddenLayerSize])
-            b1 = bias_variable([hiddenLayerSize])
-
-            w2 = weight_variable([hiddenLayerSize, hiddenLayerSize])
-            b2 = bias_variable([hiddenLayerSize])
-
-            w3 = weight_variable([hiddenLayerSize, outCount])
-            b3 = bias_variable([outCount])
-
+            
+            w1 = self._weight_variable([inDims, hiddenLayerSize])
+            b1 = self._bias_variable([hiddenLayerSize])
+            
+            w2 = self._weight_variable([hiddenLayerSize, hiddenLayerSize])
+            b2 = self._bias_variable([hiddenLayerSize])
+            
+            w3 = self._weight_variable([hiddenLayerSize, outCount])
+            b3 = self._bias_variable([outCount])
+            
         #summary ops
         w1_hist = tf.histogram_summary("w1", w1)
         b1_hist = tf.histogram_summary("b1", b1)
-
+        
         w2_hist = tf.histogram_summary("w2", w2)
         b2_hist = tf.histogram_summary("b2", b2)
-
+        
         w3_hist = tf.histogram_summary("w3", w3)
         b3_hist = tf.histogram_summary("b3", b3)
         #-----</ANN Construction>-----
-
+        
         #-----<ANN Execution>-----
         with tf.name_scope('ANN_exec') as scope:
             # massage inputs to tanh range [-1,1]
             netIn = (2*(fullIn-eRInB)/(eRInT-eRInB)) - 1
-
+            
             #run ANN
             lay1 = tf.tanh( tf.matmul(netIn, w1) + b1 )
             lay2 = tf.tanh( tf.matmul(lay1, w2) + b2 )
             netOut = tf.tanh( tf.matmul(lay2, w3) + b3 )
-
+            
             #parse and shape netOut activations into coefficient arrays.
             mixRaw = tf.slice(netOut, begin=[0,0], size=[-1,g]) #.shape == [s,g]
             varRaw = tf.slice(netOut, begin=[0,g], size=[-1,outDims]) #.shape == [s,t]
             meanRaw = tf.reshape(tf.slice(netOut, begin=[0,g+outDims], size=[-1,-1]), shape=[-1,g,outDims]) #.shape == [s,g,t]
         #-----</ANN Execution>-----
-
-
+        
+        
         #-----<Massage for Gaussian Mixture>-----
         #massaging functions, prep ANN outputs for use in gaussian mixture, see notes for explanation
-
+        
         with tf.name_scope('massage_mix') as scope:
             #mixing coefficient
             mixExp = tf.exp(mixRaw) #e^ each element of mixRaw
             mixSum = tf.reduce_sum(mixExp, 1, keep_dims=True) #reduce each sample to scalar, total of all, keep dims for broadcasting over samples
             mix = tf.div(mixExp, mixSum) #divide each mixing coefficient by the total.
-
+            
         with tf.name_scope('massage_var') as scope:
             #variances
             #varScale = tf.Variable(2.0) #TODO is this a good idea?
             var = tf.exp(tf.mul(varRaw, 2.0)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
-
+            
         with tf.name_scope('massage_mean') as scope:
             #mean
             #expand to output range
             mean = ((.5 + (meanRaw/2)) * (eROutT-eROutB)) + eROutB #this scales from relevant tanh output (-1,1)
-
+            
         #summary ops
         mix_hist = tf.histogram_summary("Mixing Coefficients", mix)
         var_hist = tf.histogram_summary("Variances", var)
         mean_hist = tf.histogram_summary("Means", mean)
         #-----</Massage for Gaussian Mixture>-----
-    
+        
         #-----<Update Reference Dict>-----
         #this section updates the instance dictionary that can be used from outside to run tensorflow output and to fill placeholders.
-        with self.refDict as rd:
-            rd['x']=fullIn,
-            rd['t']=fullOut_,
-            rd['u']=mean,  # as in 'mew'
-            rd['v']=var,
-            rd['m']=mix,
-            rd['inRange']=inRange,
-            rd['outRange']=outRange,
-            rd['netIn']=netIn,
-            rd['mixRaw']=mixRaw,
-            rd['varRaw']=varRaw
+        rd = self.refDict
+        rd['x']=fullIn
+        rd['t']=fullOut_
+        rd['u']=mean  # as in 'mew'
+        rd['v']=var
+        rd['m']=mix
+        rd['inRange']=inRange
+        rd['outRange']=outRange
+        rd['netIn']=netIn
+        rd['mixRaw']=mixRaw
+        rd['varRaw']=varRaw
         #-----</Update Reference Dict>-----
-
-
+        
+        
     def _gmix_loss_nll(self):
         """Add the negative log likelihood loss tensor to the reference dictionary
             
             This defines the nll loss function for a gaussian mixture model.
-        
+            
             #for shape definitions, s is the sample size, g is the number of gaussian components, t is the number of target components)
             
            'm' is the mixing coefficent array of shape [s,g]
@@ -346,43 +345,43 @@ class GaussianMixtureModel(object):
         
         #collect tensors from reference dictionary
         try:
-            with self.refDict as rd:
-                m = rd['m']
-                v = rd['v']
-                u = rd['u']
-                t = rd['t']
+            rd = self.refDict
+            m = rd['m']
+            v = rd['v']
+            u = rd['u']
+            t = rd['t']
         except KeyError:
             raise KeyError('Forward model tensors are missing from the reference dictionary! Call .gmix_model before .gmix_nll')
-    
-    
+            
+            
         with tf.name_scope('mixture_nll') as scope:
-
+            
             #prep terms of variance
             #add a dimension of 1 to be broadcast over the 'g' dimension in other tensors.
             v = tf.expand_dims(v, 1) #now tf.shape(v) == (s, 1, t)
             v_norm = 1/(v*tf.sqrt(2*np.pi))
             v_dem = 2*tf.square(v)
-
+            
             #prep numerator term with corresponding sample target values and net proposed means
             t = tf.expand_dims(t, 1) #add dim at 2nd position for broadcasting over means along dimension g.
             tm_num = tf.square(t-u)
-
+            
             #employ terms in pre-mixed likelihood function.
             premix = v_norm*(tf.exp(-(tm_num/v_dem)))
             #add dim for broadcasting mixing coefficients over t, the 3rd dimension.
             m = tf.expand_dims(m, 2)
-
+            
             #mix gaussian components
             likelihood = m*premix
-
+            
             #sum over the likilihood of each target and gaussian component, don't reduce over samples yet.
             #FIXME i know the gaussian components are supposed to be summed, but i'm not sure about the various targets?
             #FIXME      do i have to mix the targets like the gaussian components?
             tot_likelihood = tf.reduce_sum(likelihood, [1,2]) #sum over g and t dimensions.
-
+            
             #take natural log of sum, then reduce over samples, then negate for the final negative log likelihood
             nll = -tf.reduce_sum(tf.log(tot_likelihood)) #this reduces along the final dimension, so nll will be a scalar.
-
+            
             #summary ops
             v_norm_hist = tf.histogram_summary("Variance Normalizer", v_norm)
             v_dem_hist = tf.histogram_summary("Variance Denominator", v_dem)
@@ -391,11 +390,11 @@ class GaussianMixtureModel(object):
             likelihood_hist = tf.histogram_summary("Post-mixed Likelihood", likelihood)
             tot_likelihood_hist = tf.scalar_summary("Average Likelihood Across Samples", tf.reduce_mean(tot_likelihood))
             nll_hist = tf.scalar_summary("Negative Log Likelihood", nll)
-
+            
         #-----<Update Reference Dict>-----
         self.refDict['loss_nll'] = nll
         #-----</Update Reference Dict>-----
-
+        
     def _gmix_training_model(self, learningRate=None):
         """Adds general graph tensors to reference dictionary.
         
@@ -414,15 +413,15 @@ class GaussianMixtureModel(object):
         #-----</Argument Processing>-----
         
         with tf.name_scope('forward_model'):
-            self.gmix_forward_model()
+            self._gmix_forward_model()
         
         with tf.name_scope('loss_model') as scope:
-            self.gmix_loss_nll()
+            self._gmix_loss_nll()
         
         with tf.name_scope('train_step') as scope:
             optimizer = tf.train.GradientDescentOptimizer(learningRate)
-            gradients = optimizer.compute_gradients(loss)
-            train_step = optimizer.minimize(loss)
+            gradients = optimizer.compute_gradients(self.refDict['loss_nll'])
+            train_step = optimizer.minimize(self.refDict['loss_nll'])
         
         sess = tf.Session()
         
@@ -432,19 +431,19 @@ class GaussianMixtureModel(object):
         sess.run(tf.initialize_all_variables())
         
         #-----<Update Reference Dict>-----
-        with self.refDict as rd:
-            rd['sess']=sess
-            rd['summaries']=merged
-            rd['summaryWriter']=writer
-            rd['train_step']=train_step
-            rd['gradients']=gradients
-            rd['train_step']=train_step
+        rd = self.refDict
+        rd['sess']=sess
+        rd['summaries']=merged
+        rd['summaryWriter']=writer
+        rd['train_step']=train_step
+        rd['gradients']=gradients
+        rd['train_step']=train_step
         #-----</Update Reference Dict>-----
     def _get_refDict(self):
         """Return the reference dictionary holding tensorflow tensors.
         """
         return self.refDict
-    def _massage_training_arguments(self, iterations=1000, testBatchSize=500, trainBatchSize=1000):
+    def _massage_training_arguments(self, iterations, testBatchSize, trainBatchSize):
         iterations = range(iterations)
         
         #verify batch sizes
@@ -456,61 +455,86 @@ class GaussianMixtureModel(object):
         
         return iterations, testBatchSize, trainBatchSize
         
-    def train(self, iterations, testBatchSize, trainBatchSize):
+    def _tdb_nodes(self):
+        """Add a list of tdb nodes for evaluation by tdb.debug
+        """
+        nodeList = []
         
-        iterations, testBatchSize, trainBatchSize = self._massage_training_arguments(iterations, testBatchSize, trainBatchSize)
+        #NOTE everything in inputs must be a tensor in this session's graph!
+        #e.g. : p1=tdb.plot_op(viz.viz_conv_weights,inputs=[g.as_graph_element(conv1_weights)])
+        p_xm = tdb.plot_op(viz.x1_g, inputs=[
+                                                self.graph.as_graph_element(self.refDict['netIn']),
+                                                self.graph.as_graph_element(self.refDict['m'])
+                                            ])
+        nodeList.append(p_xm)
         
-        #build feed dict, but leave x and t empty, as they will be updated in the training loop.
-        feed_dict = {
-                        self.refDict['x']:None,
-                        self.refDict['t']:None,
-                        self.refDict['inRange']:self.inRange,
-                        self.refDict['outRange']:self.outRange
-                    }
-                    
-        #----<Training Loop>----
-        for i in iterations:
+        p_loss = tdb.plot_op(viz.watch_loss, inputs=[
+                                                self.graph.as_graph_element(self.refDict['loss_nll'])
+                                            ])
+        nodeList.append(p_loss)
+        
+        self.refDict['tdb_nodes'] = nodeList
+    
+    def train(self, iterations=1000, testBatchSize=500, trainBatchSize=1000):
+        with self.graph.as_default():
+            iterations, testBatchSize, trainBatchSize = self._massage_training_arguments(iterations, testBatchSize, trainBatchSize)
             
-            if i % 10 == 0: #run reports every 10 iterations.
-                #update feed_dict with test batch
-                feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x_test, self.t_test, testBatchSize)
+            #build feed dict, but leave x and t empty, as they will be updated in the training loop.
+            feed_dict = {
+                            self.refDict['x']:None,
+                            self.refDict['t']:None,
+                            self.refDict['inRange']:self.inRange,
+                            self.refDict['outRange']:self.outRange
+                        }
+                    
+            #----<Training Loop>----
+            for i in iterations:
+            
+                if i % 10 == 0: #run reports every 10 iterations.
+                    
+                    #update feed_dict with test batch
+                    feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x_test, self.t_test, testBatchSize)
+                    
+                    evals = [
+                                self.refDict['summaries']#,
+                                #self.refDict['loss_nll']
+                            ]
+                    evals.extend(self.refDict['tdb_nodes']) #extend with the list of tensorflow debugger nodes
                 
-                result = self.refDict['sess'].run([
-                                                self.refDict['summaries'],
-                                                self.refDict['loss']
-                                            ], feed_dict=feed_dict) #run model with test batch
-                                            
-                self.refDict['summaryWriter'].add_summary(result[0], i) #write to summary
-                print("Loss at step %s: %s" % (i, result[1])) #print loss
+                    status, result = tdb.debug(evals, feed_dict=feed_dict, session=self.refDict['sess'])
                 
-                print '-------------------------------'
+                    self.refDict['summaryWriter'].add_summary(result[0], i) #write to summary
+                    #print("Loss at step %s: %s" % (i, result[1])) #print loss
+                    #print '-------------------------------'
                 
-            else:
-                #update feed_dict with training batch
-                feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x, self.t, trainBatchSize)
-                self.refDict['sess'].run([
-                                        self.refDict['train_step']
-                                    ], feed_dict=feed_dict) #run train_step with training batch
-        #----<Training Loop>----
+                else:
+                    #update feed_dict with training batch
+                    feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x, self.t, trainBatchSize)
+                    self.refDict['sess'].run([
+                                            self.refDict['train_step']
+                                        ], feed_dict=feed_dict) #run train_step with training batch
+            #----<Training Loop>----
     def get_xmvu(self):
-        #update feed_dict with full test data batch
-        feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self.x_test, self.t_test
-        #evaluate the trained model at m, v, and u with the test data.
-        result = self.refDict['sess'].run([
-                                        self.refDict['m'],
-                                        self.refDict['v'],
-                                        self.refDict['u']
-                                    ],feed_dict=feed_dict)
-        return result[0], result[1], result[2] #m, v, u
+        with self.graph.as_default():
+            feed_dict = {
+                            self.refDict['x']:self.x_test,
+                            self.refDict['t']:self.t_test,
+                            self.refDict['inRange']:self.inRange,
+                            self.refDict['outRange']:self.outRange
+                        }
+        
+            #evaluate the trained model at m, v, and u with the test data.
+            result = self.refDict['sess'].run([
+                                            self.refDict['m'],
+                                            self.refDict['v'],
+                                            self.refDict['u']
+                                        ],feed_dict=feed_dict)
+            return result[0], result[1], result[2] #m, v, u
     def get_write_xmvu(self, path):
         m, v, u = self.get_xmvu()
         
         np.savez(path, x=self.t_test, m=m, v=v, u=u) #write this to an npz file for later sampling
 
-    def _gmix_full_model(self):
-        self.gmix_forward_model()
-        self.gmix_loss_nll()
-        self.gmix_training_model()
 #
 #----------------------------------------------------------------<MAIN>----------------------------------------------------------------
 
@@ -524,7 +548,7 @@ train and test should obviously be different sets of data from the same source.
 
 """
 
-XMVU_PATH = "/Users/azane/GitRepo/spider/data/xmvu.npz" #file to which the xmvu data, for sampling is written after training.
+XMVU_PATH = "/Users/azane/GitRepo/spider/data/xmvu.npz" #file to which the xmvu data, for sampling, is written after training.
 
 if __name__ == "__main__":
     #TODO TODO split up this main section. make a function that can be called just with x and t array values
@@ -538,5 +562,5 @@ if __name__ == "__main__":
     
     gmm = GaussianMixtureModel(s_x, s_t, t_x, t_t)
     gmm.train()
-    gmm.get_write_xmvu()
+    gmm.get_write_xmvu(XMVU_PATH)
     

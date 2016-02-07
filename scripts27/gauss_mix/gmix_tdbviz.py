@@ -24,3 +24,29 @@ we need to visualize:
 
 #so! we
 """
+import matplotlib.pyplot as plt
+import numpy as np
+import gmix_sample_mixture
+
+
+def x1_g(ctx, x, g, yLabel='Mixing Coefficients'):
+    #x.shape == [s,x]
+    #g.shape == [s,g]
+    #TODO plot an arbitrary number of mixing lines.
+    print('g[:,0].shape: ' + str(g[:,0].shape))
+    plt.plot(x[:,0], g[:,0])
+    plt.xlabel('Input Range')
+    plt.ylabel(yLabel)
+
+def x1_t(ctx, x, t):
+    pass
+
+def x1_g_t(ctx, x, g, t):
+    pass
+
+def watch_loss(ctx, loss):
+  if not hasattr(ctx, 'loss_history'):
+    ctx.loss_history=[]
+  ctx.loss_history.append(loss)
+  plt.plot(ctx.loss_history)
+  plt.ylabel('Loss')
