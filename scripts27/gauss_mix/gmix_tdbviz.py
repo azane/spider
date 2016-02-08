@@ -30,6 +30,11 @@ import gmix_sample_mixture as smpl
 
 #----<helper functions>----
 def sort_by_x(x, y):
+    
+    #copy x and y before manipulating them
+    x = np.copy(x)
+    y = np.copy(y)
+    
     #x and y should be 1d at this point .shape == [s,]
     xy = np.column_stack((x,y))  # stack horizontally
     xy = xy[xy[:,0].argsort()]  # sort by the x column
@@ -40,12 +45,17 @@ def x1_yMany(x, y, xLabel='', yLabel='', title=''):
     #x.shape == [s,x]
     #y.shape == [s,t/y]
     
-    x_ = x[:,0]  # select the 1st input dimension
+    #copy x and y before manipulating them
+    x = np.copy(x)
+    y = np.copy(y)
+    
+    
+    x_hold = x[:,0]  # select the 1st input dimension
     
     #iterate the output dimensions, plotting each line with the original x values.
     for outDim in range(y.shape[1]):
         y_ = y[:,outDim]
-        x_, y_ = sort_by_x(x_, y_)
+        x_, y_ = sort_by_x(x_hold, y_)
         plt.plot(x_, y_)
     
     plt.xlabel(xLabel)
@@ -88,6 +98,10 @@ def sample(ctx, x, m, v, u):
     x, y = smpl.sample_mixture(x, m, v, u)
     plt.scatter(x, y)
     plt.title('Sampling of GMM')
+    
+def training_data(ctx, x, t):
+    plt.scatter(x, t)
+    plt.title('Training Data')
 
 def watch_loss(ctx, loss):
     #snagged from tdb viz example file.
@@ -103,5 +117,77 @@ def lay2_overX(ctx, x, netOut):
     x1_yMany(x, netOut, xLabel='Input Range', yLabel='ANN Layer 2', title='ANN Layer 2 over X')
 def netOut_overX(ctx, x, netOut):
     x1_yMany(x, netOut, xLabel='Input Range', yLabel='ANN Output', title='ANN Output over X')
+
+def report_net(ctx, w1, b1, w2, b2, w3, b3, hSize):
+    
+    """
+    This functions creates a pile of subplots that sensibly displays the iteration series of
+     the weights and biases of a network with 2 hidden layers of variable size.
+    """
+    
+    return #TEMP
+    
+    #---<Series>---
+    if not hasattr(ctx, 'net_history'):
+        ctx.net_history = dict(
+            w1=[],
+            w2=[],
+            w3=[],
+            b1=[],
+            b2=[],
+            b3=[]
+        )
+    ctx.net_history['w1'].append(w1)
+    ctx.net_history['w2'].append(w2)
+    ctx.net_history['w3'].append(w3)
+    ctx.net_history['b1'].append(b1)
+    ctx.net_history['b2'].append(b2)
+    ctx.net_history['b3'].append(b3)
+    #---</Series>---
+    
+    #---<Display>---
+    if not hasattr(ctx, 'net_info'):
+        cols = (hSize*hSize) + (hSize-1) #for hSize groups of hSize, with one space in between each.
+        if cols%2 == 0:
+            mid = cols/2
+            #if even, leave two spaces in the middle, and add one to cols for the extra space.
+            dblMid = True
+            cols += 1
+        else:
+            mid = (cols/2) + 1  # set mid to actual middle
+            dblMid = False
+        
+        rows = 7
+        
+        ctx.net_info = dict(
+            cols=cols,
+            rows=rows,
+            mid=mid,
+            dblMid=dblMid,
+            hSize=hSize
+        )
+    
+    #TODO
+    #for r in range(ctx.net_info['hSize']): #  iterate layer size
+        
+    
+    
+    """in
+    
+    w*5
+    b*5 and activations
+    
+    w*5
+    b*5 and activations
+    
+    w*5
+    b*5 and activations
+    """
+    
+    #---</Display>---
+    
 #----</CTX functions>----
 
+#----<Op Functions>----
+
+#----<Op Functions>----

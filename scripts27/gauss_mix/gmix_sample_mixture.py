@@ -31,7 +31,7 @@ def sample_mixture(x, m, v, u):
     #sample all distributions for all targets, given corresponding v,u
     vec_normal = np.vectorize(np.random.normal) #vectorize for broadcasted operations.
     premix = vec_normal(u, v) #premix.shape == (s,g,t)
-    print 'premix.shape: ' + str(premix.shape)
+    #print 'premix.shape: ' + str(premix.shape)
     
     #create output array y, this will be overwritten with target values.
     y = np.zeros((s,t))
@@ -42,7 +42,7 @@ def sample_mixture(x, m, v, u):
         #for this sample, select the target array of this gSelection
         y[i] = premix[i,gSelection]
     
-    print 'y.shape: ' + str(y.shape)
+    #print 'y.shape: ' + str(y.shape)
     
     return x, y
 

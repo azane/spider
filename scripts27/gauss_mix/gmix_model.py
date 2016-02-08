@@ -278,12 +278,12 @@ class GaussianMixtureModel(object):
             netIn = (2*(fullIn-eRInB)/(eRInT-eRInB)) - 1
             
             #run ANN
-            #lay1 = tf.tanh( (tf.matmul(netIn, w1) + b1) )
-            lay1 = tf.matmul(netIn, w1) + b1
-            #lay2 = tf.tanh( (tf.matmul(lay1, w2) + b2) )
-            lay2 = tf.matmul(lay1, w2) + b2
-            #netOut = tf.tanh( (tf.matmul(lay2, w3) + b3) )
-            netOut = tf.matmul(lay2, w3) + b3
+            lay1 = tf.tanh( (tf.matmul(netIn, w1)) + b1)
+            #lay1 = tf.nn.bias_add(tf.matmul(netIn, w1), b1)
+            lay2 = tf.tanh( (tf.matmul(lay1, w2)) + b2)
+            #lay2 = tf.nn.bias_add(tf.matmul(lay1, w2), b2)
+            netOut = tf.tanh( (tf.matmul(lay2, w3)) + b3)
+            #netOut = tf.nn.bias_add(tf.matmul(lay2, w3), b3)
             
             #parse and shape netOut activations into coefficient arrays.
             mixRaw = tf.slice(netOut, begin=[0,0], size=[-1,g]) #.shape == [s,g]
@@ -321,23 +321,37 @@ class GaussianMixtureModel(object):
         
         #FIXME this is a workaround for x retrievals that say, "fed and fetched, you suck"
         fetchX = ((.5 + (netIn/2)) * (eROutT-eROutB)) + eROutB  # expand from tanh
+        mid_fetchT = (2*(fullOut_-eRInB)/(eRInT-eRInB)) - 1
+        fetchT = ((.5 + (mid_fetchT/2)) * (eROutT-eROutB)) + eROutB  # expand from tanh
         
         #this section updates the instance dictionary that can be used from outside to run tensorflow output and to fill placeholders.
         rd = self.refDict
         rd['x']=fullIn
         rd['fetchX']=fetchX
         rd['t']=fullOut_
+        rd['fetchT']=fetchT
         rd['u']=mean  # as in 'mew'
         rd['v']=var
         rd['m']=mix
         rd['inRange']=inRange
         rd['outRange']=outRange
-        rd['netIn']=netIn
+        
         rd['mixRaw']=mixRaw
         rd['varRaw']=varRaw
-        rd['netOut']=netOut
+        rd['meanRaw']=meanRaw
+        
+        rd['netIn']=netIn
         rd['lay1']=lay1
         rd['lay2']=lay2
+        rd['netOut']=netOut
+        
+        rd['w1']=w1
+        rd['w2']=w2
+        rd['w3']=w3
+        rd['b1']=b1
+        rd['b2']=b2
+        rd['b3']=b3
+        rd['hiddenLayerSize']=tf.constant(hiddenLayerSize)
         #-----</Update Reference Dict>-----
         
         
@@ -471,6 +485,8 @@ class GaussianMixtureModel(object):
         """
         nodeList = []
         
+        #----<Plots>----
+        
         #mixing coefficients full update
         p_xm = tdb.plot_op(viz.mixing_coefficients, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
@@ -528,6 +544,31 @@ class GaussianMixtureModel(object):
                                                             ])
         nodeList.append(p_netout)
         
+        #report on net calculations outside of tensorflow.
+        p_ann = tdb.plot_op(viz.report_net, inputs=[
+                                                                self.graph.as_graph_element(self.refDict['w1']),
+                                                                self.graph.as_graph_element(self.refDict['b1']),
+                                                                self.graph.as_graph_element(self.refDict['w2']),
+                                                                self.graph.as_graph_element(self.refDict['b2']),
+                                                                self.graph.as_graph_element(self.refDict['w3']),
+                                                                self.graph.as_graph_element(self.refDict['b3']),
+                                                                self.graph.as_graph_element(self.refDict['hiddenLayerSize'])
+                                                            ])
+        nodeList.append(p_ann)
+        
+        #training data
+        p_training_data = tdb.plot_op(viz.training_data, inputs=[
+                                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                                self.graph.as_graph_element(self.refDict['fetchT'])
+                                                            ])
+        nodeList.append(p_training_data)
+        
+        #----</Plots>----
+        
+        #----<Report ops>----
+        
+        
+        #----</Report ops>----
         
         self.refDict['tdb_nodes'] = nodeList
     
@@ -542,7 +583,8 @@ class GaussianMixtureModel(object):
                             self.refDict['inRange']:self.inRange,
                             self.refDict['outRange']:self.outRange
                         }
-                    
+            
+            result = None #final result for notebook testing.
             #----<Training Loop>----
             for i in iterations:
             
@@ -554,14 +596,28 @@ class GaussianMixtureModel(object):
                     evals = [
                                 #self.refDict['summaries']#,
                                 #self.refDict['loss_nll']
+                                
+                                #TEMP
+                                self.refDict['w1'],
+                                self.refDict['b1'],
+                                self.refDict['w2'],
+                                self.refDict['b2'],
+                                self.refDict['w3'],
+                                self.refDict['b3'],
+                                self.refDict['lay1'],
+                                self.refDict['lay2'],
+                                self.refDict['netOut'],
+                                self.refDict['netIn']
                             ]
+                            
                     evals.extend(self.refDict['tdb_nodes']) #extend with the list of tensorflow debugger nodes
-                
+                    
                     status, result = tdb.debug(evals, feed_dict=feed_dict, session=self.refDict['sess'])
-                
+                    
                     #self.refDict['summaryWriter'].add_summary(result[0], i) #write to summary
                     #print("Loss at step %s: %s" % (i, result[1])) #print loss
                     #print '-------------------------------'
+                    
                 
                 else:
                     #update feed_dict with training batch
@@ -570,6 +626,21 @@ class GaussianMixtureModel(object):
                                             self.refDict['train_step']
                                         ], feed_dict=feed_dict) #run train_step with training batch
             #----<Training Loop>----
+            
+            #TEMP for notebook testing.
+            return dict( 
+                        w1=result[0],
+                        b1=result[1],
+                        w2=result[2],
+                        b2=result[3],
+                        w3=result[4],
+                        b3=result[5],
+                        lay1=result[6],
+                        lay2=result[7],
+                        netOut=result[8],
+                        netIn=result[9]
+                        )
+            
     def get_xmvu(self):
         with self.graph.as_default():
             feed_dict = {
