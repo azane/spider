@@ -297,14 +297,13 @@ class GaussianMixtureModel(object):
         
         with tf.name_scope('massage_mix') as scope:
             #mixing coefficient
-            mixExp = tf.exp(mixRaw) #e^ each element of mixRaw
-            mixSum = tf.reduce_sum(mixExp, 1, keep_dims=True) #reduce each sample to scalar, total of all, keep dims for broadcasting over samples
-            mix = tf.div(mixExp, mixSum) #divide each mixing coefficient by the total.
+            #compute softmax so that the mixing coefficients sum to 1 across x.
+            mix = tf.nn.softmax(mixRaw)
             
         with tf.name_scope('massage_var') as scope:
             #variances
             #varScale = tf.Variable(2.0) #TODO is this a good idea?
-            var = tf.exp(tf.mul(varRaw, 2.0)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
+            var = tf.exp(tf.mul(varRaw, 1.0)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
             
         with tf.name_scope('massage_mean') as scope:
             #mean
@@ -445,7 +444,6 @@ class GaussianMixtureModel(object):
         
         with tf.name_scope('train_step') as scope:
             optimizer = tf.train.GradientDescentOptimizer(learningRate)
-            gradients = optimizer.compute_gradients(self.refDict['loss_nll'])
             train_step = optimizer.minimize(self.refDict['loss_nll'])
         
         sess = tf.Session()
@@ -455,14 +453,26 @@ class GaussianMixtureModel(object):
         
         sess.run(tf.initialize_all_variables())
         
+        #----<Convert Gradients>----
+        gradients = optimizer.compute_gradients(self.refDict['loss_nll'])
+        gradients = dict(gradients) #store list of tuples as dict
+        inv_grad = dict((v,k) for k,v in gradients.iteritems()) #invert dict so tensor is the key
+        #----</Convert Gradients>----
+        
         #-----<Update Reference Dict>-----
         rd = self.refDict
         rd['sess']=sess
         rd['summaries']=merged
         rd['summaryWriter']=writer
         rd['train_step']=train_step
-        rd['gradients']=gradients
-        rd['train_step']=train_step
+        
+        #use the network variables as keys for the gradients dictionary, store for later use.
+        rd['grad_w1']=inv_grad[rd['w1']]
+        rd['grad_b1']=inv_grad[rd['b1']]
+        rd['grad_w2']=inv_grad[rd['w2']]
+        rd['grad_b2']=inv_grad[rd['b2']]
+        rd['grad_w3']=inv_grad[rd['w3']]
+        rd['grad_b3']=inv_grad[rd['b3']]
         #-----</Update Reference Dict>-----
     def _get_refDict(self):
         """Return the reference dictionary holding tensorflow tensors.
@@ -528,14 +538,14 @@ class GaussianMixtureModel(object):
                                                             self.graph.as_graph_element(self.refDict['fetchX']),
                                                             self.graph.as_graph_element(self.refDict['lay1'])
                                                         ])
-        nodeList.append(p_lay1)
+        #nodeList.append(p_lay1)
         
         #lay2
         p_lay2 = tdb.plot_op(viz.lay2_overX, inputs=[
                                                             self.graph.as_graph_element(self.refDict['fetchX']),
                                                             self.graph.as_graph_element(self.refDict['lay2'])
                                                         ])
-        nodeList.append(p_lay2)
+        #nodeList.append(p_lay2)
         
         #net out
         p_netout = tdb.plot_op(viz.netOut_overX, inputs=[
@@ -554,7 +564,7 @@ class GaussianMixtureModel(object):
                                                                 self.graph.as_graph_element(self.refDict['b3']),
                                                                 self.graph.as_graph_element(self.refDict['hiddenLayerSize'])
                                                             ])
-        nodeList.append(p_ann)
+        #nodeList.append(p_ann)
         
         #training data
         p_training_data = tdb.plot_op(viz.training_data, inputs=[
@@ -576,6 +586,7 @@ class GaussianMixtureModel(object):
         with self.graph.as_default():
             iterations, testBatchSize, trainBatchSize = self._massage_training_arguments(iterations, testBatchSize, trainBatchSize)
             
+            
             #build feed dict, but leave x and t empty, as they will be updated in the training loop.
             feed_dict = {
                             self.refDict['x']:None,
@@ -588,7 +599,7 @@ class GaussianMixtureModel(object):
             #----<Training Loop>----
             for i in iterations:
             
-                if i % 10 == 0: #run reports every 10 iterations.
+                if i % reportEvery == 0: #run reports every 10 iterations.
                     
                     #update feed_dict with test batch
                     feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x_test, self.t_test, testBatchSize)
@@ -597,22 +608,35 @@ class GaussianMixtureModel(object):
                                 #self.refDict['summaries']#,
                                 #self.refDict['loss_nll']
                                 
-                                #TEMP
-                                self.refDict['w1'],
-                                self.refDict['b1'],
-                                self.refDict['w2'],
-                                self.refDict['b2'],
-                                self.refDict['w3'],
-                                self.refDict['b3'],
-                                self.refDict['lay1'],
-                                self.refDict['lay2'],
-                                self.refDict['netOut'],
-                                self.refDict['netIn']
+                                #network stuff
+                                self.refDict['w1'], #0
+                                self.refDict['b1'], #1
+                                self.refDict['w2'], #2
+                                self.refDict['b2'], #3
+                                self.refDict['w3'], #4
+                                self.refDict['b3'], #5
+                                self.refDict['lay1'], #6
+                                self.refDict['lay2'], #7
+                                self.refDict['netOut'], #8
+                                self.refDict['netIn'], #9
+                                
+                                #gradient stuff
+                                self.refDict['grad_w1'], #10
+                                self.refDict['grad_b1'], #11
+                                self.refDict['grad_w2'], #12
+                                self.refDict['grad_b2'], #13
+                                self.refDict['grad_w3'], #14
+                                self.refDict['grad_b3'] #15
+                                
                             ]
                             
                     evals.extend(self.refDict['tdb_nodes']) #extend with the list of tensorflow debugger nodes
                     
-                    status, result = tdb.debug(evals, feed_dict=feed_dict, session=self.refDict['sess'])
+                    breakpoints = [
+                                    self.refDict['loss_nll']
+                                ]
+                    
+                    status, result = tdb.debug(evals, feed_dict=feed_dict, session=self.refDict['sess'])#, breakpoints=breakpoints)
                     
                     #self.refDict['summaryWriter'].add_summary(result[0], i) #write to summary
                     #print("Loss at step %s: %s" % (i, result[1])) #print loss
@@ -627,8 +651,10 @@ class GaussianMixtureModel(object):
                                         ], feed_dict=feed_dict) #run train_step with training batch
             #----<Training Loop>----
             
-            #TEMP for notebook testing.
-            return dict( 
+            #for notebook testing.
+            return dict(
+                        
+                        #net stuff
                         w1=result[0],
                         b1=result[1],
                         w2=result[2],
@@ -638,7 +664,15 @@ class GaussianMixtureModel(object):
                         lay1=result[6],
                         lay2=result[7],
                         netOut=result[8],
-                        netIn=result[9]
+                        netIn=result[9],
+                        
+                        #gradient stuff
+                        grad_w1=result[10],
+                        grad_b1=result[11],
+                        grad_w2=result[12],
+                        grad_b2=result[13],
+                        grad_w3=result[14],
+                        grad_b3=result[15]
                         )
             
     def get_xmvu(self):
