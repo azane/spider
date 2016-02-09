@@ -25,16 +25,36 @@ def get_xt_from_npz(npz_path):
             t = xt['y'] #try under y.
 
     return x, t
+def tf_normal_dist(m, v, t):
+    """Return a the tf likelihood tensor
+    
+    This function builds a tf node that calculates the likelihood of t, given means and variance, as a function of the normal.
+    """
+    
+    # m.shape == (s,g,t)
+    # v.shape == (s,t)
+    # t.shape == (s,t)
+    
+    with tf.name_scope('normal_likelihood') as scope:
+        #prep terms of variance
+        v = tf.expand_dims(v, 1) #now tf.shape(v) == (s,1,t)
+        v_norm = 1/(v*tf.sqrt(2*np.pi))
+        v_dem = 2*tf.square(v)
+    
+        #prep numerator term with corresponding sample target values and net proposed means
+        t = tf.expand_dims(t, 1) #add dim at 2nd position for broadcasting over means along dimension g.
+        tm_num = tf.square(t-u)
+    
+        #employ terms in pre-mixed likelihood function.
+        premix = v_norm*(tf.exp(-(tm_num/v_dem)))
+        #add dim for broadcasting mixing coefficients over t, the 3rd dimension.
+        m = tf.expand_dims(m, 2)
+    
+        #mix gaussian components
+        likelihood = m*premix
+    
+    return likelihood
 #-----</Helper Functions>-----
-
-"""brainstorming for time series tdb
-keep a pile of np.array 1d objects that get data appended to them when the process runs.
-feed these arrays, into the debug session, into the placeholders that are graphed by tdb plot ops.
-the debug session will then take the data from the placeholders, and return evaluated plot ops, ready for graphing.
-
-we should keep a dictionary of these placeholders, and extend the feed dictionary, automatically defining stuff, when it gets plugged into the debug session.
-
-"""
 
 class GaussianMixtureModel(object):
     def TODOsFIXMEs():
@@ -162,6 +182,7 @@ class GaussianMixtureModel(object):
         """
         #initialize weights on a truncated normal distribution
         initial = tf.truncated_normal(shape, stddev=0.5)
+        #tf.clip_by_value(initial, -5., 5.)
         return tf.Variable(initial)
 
     def _bias_variable(self, shape):
@@ -170,6 +191,7 @@ class GaussianMixtureModel(object):
         """
         #initialize non-zero bias matrix
         initial = tf.constant(0.1, shape=shape)
+        #tf.clip_by_value(initial, -1., 1.)
         return tf.Variable(initial)
 
     def _shape_range_for_elementwise(self, r, rank=1):
@@ -444,7 +466,9 @@ class GaussianMixtureModel(object):
         
         with tf.name_scope('train_step') as scope:
             optimizer = tf.train.GradientDescentOptimizer(learningRate)
-            train_step = optimizer.minimize(self.refDict['loss_nll'])
+            #optimizer = tf.train.MomentumOptimizer(learningRate, 0.01)
+            gateGrad = optimizer.GATE_GRAPH
+            train_step = optimizer.minimize(self.refDict['loss_nll'], gate_gradients=gateGrad)
         
         sess = tf.Session()
         
@@ -454,9 +478,21 @@ class GaussianMixtureModel(object):
         sess.run(tf.initialize_all_variables())
         
         #----<Convert Gradients>----
-        gradients = optimizer.compute_gradients(self.refDict['loss_nll'])
+        #all variables
+        #this returns a list of tuples
+        gradients = optimizer.compute_gradients(self.refDict['loss_nll'], gate_gradients=gateGrad)
         gradients = dict(gradients) #store list of tuples as dict
         inv_grad = dict((v,k) for k,v in gradients.iteritems()) #invert dict so tensor is the key
+        
+        #loss with respect to m,v,u
+        #this returns a list of gradients.
+        #this gives the summed gradients over x, holding the others equal.
+        #   i.e. it's a scalar value that simply shows how much each one needs to be different than what it is.
+        grad_mvu = tf.gradients(self.refDict['loss_nll'], [
+                                                            self.refDict['m'],
+                                                            self.refDict['v'],
+                                                            self.refDict['u']
+                                                        ], gate_gradients=gateGrad)
         #----</Convert Gradients>----
         
         #-----<Update Reference Dict>-----
@@ -473,10 +509,15 @@ class GaussianMixtureModel(object):
         rd['grad_b2']=inv_grad[rd['b2']]
         rd['grad_w3']=inv_grad[rd['w3']]
         rd['grad_b3']=inv_grad[rd['b3']]
+        
+        rd['grad_m']=grad_mvu[0]
+        rd['grad_v']=grad_mvu[1]
+        rd['grad_u']=grad_mvu[2]
         #-----</Update Reference Dict>-----
     def _get_refDict(self):
         """Return the reference dictionary holding tensorflow tensors.
         """
+        #TODO incorporate some method whereby arbitrarily selected elements of the reference dict are compute and returned as ndarrays.
         return self.refDict
     def _massage_training_arguments(self, iterations, testBatchSize, trainBatchSize):
         iterations = range(iterations)
@@ -573,6 +614,30 @@ class GaussianMixtureModel(object):
                                                             ])
         nodeList.append(p_training_data)
         
+        
+        #----<Gradients Over X>-----
+        #grad_m over x
+        p_grad_m = tdb.plot_op(viz.grad_m, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['grad_m'])
+                                            ])
+        nodeList.append(p_grad_m)
+        
+        #grad_v over x
+        p_grad_v = tdb.plot_op(viz.grad_v, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['grad_v'])
+                                            ])
+        nodeList.append(p_grad_v)
+        
+        #grad_u over x
+        p_grad_u = tdb.plot_op(viz.grad_u, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['grad_u'])
+                                            ])
+        nodeList.append(p_grad_u)
+        #----<Gradients Over X>-----
+        
         #----</Plots>----
         
         #----<Report ops>----
@@ -626,7 +691,11 @@ class GaussianMixtureModel(object):
                                 self.refDict['grad_w2'], #12
                                 self.refDict['grad_b2'], #13
                                 self.refDict['grad_w3'], #14
-                                self.refDict['grad_b3'] #15
+                                self.refDict['grad_b3'], #15
+                                
+                                self.refDict['grad_m'], #16
+                                self.refDict['grad_v'], #17
+                                self.refDict['grad_u'] #18
                                 
                             ]
                             
@@ -672,7 +741,11 @@ class GaussianMixtureModel(object):
                         grad_w2=result[12],
                         grad_b2=result[13],
                         grad_w3=result[14],
-                        grad_b3=result[15]
+                        grad_b3=result[15],
+                        
+                        grad_m=result[16],
+                        grad_v=result[17],
+                        grad_u=result[18]
                         )
             
     def get_xmvu(self):

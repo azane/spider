@@ -62,14 +62,18 @@ def x1_yMany(x, y, xLabel='', yLabel='', title=''):
     plt.ylabel(yLabel)
     plt.title(title)
     
-#----</helper functions>----
-
-
-#----<CTX functions>----
-def mixing_coefficients(ctx, x, g):
-    x1_yMany(x, g, xLabel='Input Range', yLabel='Relevance', title='Mixing Coefficients over X')
+def watch(ctx, y, yLabel='', title=''):
+    if not hasattr(ctx, 'history'):
+        ctx.history = []
     
-def means(ctx, x, u):
+    ctx.history.append(y)
+    plt.plot(ctx.history)
+    
+    plt.xlabel('Iterations')
+    plt.ylabel(yLabel)
+    plt.title(title)
+
+def help_means(x, u, xLabel='Input Range', yLabel='Output Range', title='Means'):
     #x.shape == [s,x]
     #u.shape == [s,g,t]
     
@@ -88,28 +92,55 @@ def means(ctx, x, u):
     #   plot g lines, then write a subplot after g's are finished.
     for outDim in range(u.shape[2]):
         #make plot of all g's for this subplot.
-        x1_yMany(x, u[:,:,outDim], xLabel='Input Range', yLabel='Output Range', title='Means')
+        x1_yMany(x, u[:,:,outDim], xLabel=xLabel, yLabel=yLabel, title=title)
         plt.subplot(rows, cols, (outDim+1))
+#----</helper functions>----
+
+
+#----<CTX functions>----
+#Outputs
+def mixing_coefficients(ctx, x, g):
+    x1_yMany(x, g, xLabel='Input Range', yLabel='Relevance', title='Mixing Coefficients over X')
+
+def means(ctx, x, u):
+    help_means(x, u)
 
 def variances(ctx, x, v):
-    x1_yMany(x, v, xLabel='Input Range', yLabel='Standard Deviation', title='Standard Deviation over X')
+    x1_yMany(x, v, xLabel='Input Range', yLabel='Standard Deviation', title='Standard Deviation Over X')
 
+#Error over X
+def grad_v(ctx, x, v):
+    x1_yMany(x, v, xLabel='Input Range', yLabel='Error', title='STD Error Over X')
+
+def grad_m(ctx, x, m):
+    x1_yMany(x, m, xLabel='Input Range', yLabel='Error', title='Mixing Coefficient Error Over X')
+
+def grad_u(ctx, x, u):
+    help_means(x, u, yLabel='Error', title='Mean Error Over X')
+
+#Full sample of current mixture model
 def sample(ctx, x, m, v, u):
     x, y = smpl.sample_mixture(x, m, v, u)
     plt.scatter(x, y)
     plt.title('Sampling of GMM')
-    
+
+#training data
 def training_data(ctx, x, t):
     plt.scatter(x, t)
     plt.title('Training Data')
 
 def watch_loss(ctx, loss):
-    #snagged from tdb viz example file.
-    if not hasattr(ctx, 'loss_history'):
-        ctx.loss_history=[]
-    ctx.loss_history.append(loss)
-    plt.plot(ctx.loss_history)
-    plt.ylabel('Loss')
+    watch(ctx, loss, yLabel='Loss', title='Loss')
+
+def watch_grad_m(ctx, grad_m):
+    watch(ctx, np.mean(np.absolute(grad_m), axis=0), title='Mixing Coefficient Wrongness')
+    
+def watch_grad_v(ctx, grad_v):
+    watch(ctx, np.mean(np.absolute(grad_v), axis=0), title='Standard Deviation Wrongness')
+
+def watch_grad_u(ctx, grad_u):
+    watch(ctx, np.mean(np.absolute(grad_u), axis=0), title='Standard Deviation Wrongness')
+    
 
 def lay1_overX(ctx, x, netOut):
     x1_yMany(x, netOut, xLabel='Input Range', yLabel='ANN Layer 1', title='ANN Layer 1 over X')

@@ -28,6 +28,8 @@ def sample_mixture(x, m, v, u):
     #expand dims for broadcasting
     v = np.expand_dims(v, 1) #v.shape == (s,1,t)
     
+    #print v
+    
     #sample all distributions for all targets, given corresponding v,u
     vec_normal = np.vectorize(np.random.normal) #vectorize for broadcasted operations.
     premix = vec_normal(u, v) #premix.shape == (s,g,t)
