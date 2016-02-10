@@ -16,44 +16,127 @@ def get_xt_from_npz(npz_path):
         'x' must be under npz['x']
         't' must be under either npz['t'] or npz['y']
     """
-
+    
     with np.load(npz_path, allow_pickle=False) as xt:
         x = xt['x']
         try:
             t = xt['t']
         except KeyError:
             t = xt['y'] #try under y.
-
+            
     return x, t
-def tf_normal_dist(m, v, t):
-    """Return a the tf likelihood tensor
+    
+def tf_gaussian_likelihood(m, v, u, t):
+    """Return the tf likelihood tensor
     
     This function builds a tf node that calculates the likelihood of t, given means and variance, as a function of the normal.
+    This requires that m,v,u,t can all be broadcast together.
     """
     
-    # m.shape == (s,g,t)
-    # v.shape == (s,t)
-    # t.shape == (s,t)
+    assert tf.rank(m) = tf.rank(v) and tf.rank(u) == tf.rank(t) and tf.rank(m) == tf.rank(u), \
+            "m,v,u,t must all be pre-expanded and able to be broadcast together."
+    #TODO add checks for broadcast worthy shapes.
     
     with tf.name_scope('normal_likelihood') as scope:
         #prep terms of variance
-        v = tf.expand_dims(v, 1) #now tf.shape(v) == (s,1,t)
-        v_norm = 1/(v*tf.sqrt(2*np.pi))
-        v_dem = 2*tf.square(v)
-    
+        v_norm = 1/(v*tf.sqrt(2*np.pi))  # the normalizing term
+        v_dem = 2*tf.square(v)  # the denominator in the exp
+        
         #prep numerator term with corresponding sample target values and net proposed means
-        t = tf.expand_dims(t, 1) #add dim at 2nd position for broadcasting over means along dimension g.
         tm_num = tf.square(t-u)
-    
+        
         #employ terms in pre-mixed likelihood function.
         premix = v_norm*(tf.exp(-(tm_num/v_dem)))
-        #add dim for broadcasting mixing coefficients over t, the 3rd dimension.
-        m = tf.expand_dims(m, 2)
-    
+        
         #mix gaussian components
         likelihood = m*premix
+        
+    return likelihood  # tf.shape(likelihood) == (s,g,t)
+
+def tf_gmm_likelihood_k(m, v, u, t):
+    """Return the probability that t came from g component
     
-    return likelihood
+    This function builds a tf node that calculates the likelihood of t for individual components, over an entire mixture model.
+    This divides the likelihood of each component by the sum of the others, thus normalizing the probability of each component.
+    This requires that m,v,u,t can all be broadcast together.
+    """
+    
+    likelihood = tf_gaussian_likelihood(m, v, u, t)
+    
+    #sum over the components for each sample, for each target
+    denominator = tf.reduce_sum(likelihood, reduction_indices=1, keep_dims=True)  # tf.shape(denominator) = (s,1,t)
+    
+    #return the probability that t target came from g component
+    return likelihood/denominator  # return.shape() == (s,g,t)
+
+#----<Loss Gradients>-----
+#   NOTE: v(standard deviation), u(means), and t(targets) must all be normalized to the same range before calling these functions.
+#   FIXME verify that this is the case!!!
+def tf_grad_mvu(m, v, u, t):
+    """
+    This is a helper function that takes the same mvut and calculates and returns all the gradients.
+        - to prevent accidentally calling the grad functions wih mvut over differing ranges.
+    This requires that m,v,u,t can all be broadcast together.
+    """
+    grad_m = tf_grad_m(m, v, u, t)
+    grad_v = tf_grad_v(m, v, u, t)
+    grad_u = tf_grad_u(m, v, u, t)
+    
+    return grad_m, grad_v, grad_u
+    
+def tf_grad_m(m, v, u, t):
+    """Return the unaggregated (over samples) gradient of the nll with respect to ann outputs governing mixing coefficients.
+    This requires that m,v,u,t can all be broadcast together.
+    """
+    
+    #compute the gradients
+    #   the 'posterior' subtracted from the 'prior' mixing coefficient.
+    grads =  m - tf_gmm_likelihood_k(m, v, u, t)  # grads.shape() == (s,g,t)
+    
+    #aggregate over the targets.
+    #   preserve s for visualizing over x
+    grads = tf.reduce_sum(grads, reduction_indices=2)  # .shape() == (s,g)
+    
+    return grads  # .shape() == (s,g)
+    
+def tf_grad_v(m, v, u, t):
+    """Return the unaggregated (over samples) gradient of the nll with respect to ann outputs governing variance.
+    This requires that m,v,u,t can all be broadcast together.
+    """
+    
+    #compute the gradients
+    grads = -1*tf_gmm_likelihood_k(m, v, u, t)*((((t-u)**2)/(v**3))-(1/v))
+    
+    #aggregate over the gaussian components, as variance is by t.
+    #   preserve s for visualizing over x
+    grads = tf.reduce_sum(grads, reduction_indices=1)  # .shape() == (s,t)
+    
+    return grads  # .shape() == (s,t)
+    
+def tf_grad_u(m, v, u, t):
+    """Return the unaggregate (over samples) gradient of the nll with respect to ann outputs governing the means.
+    This requires that m,v,u,t can all be broadcast together.
+    """
+    
+    #compute the gradients
+    grads = tf_gmm_likelihood_k(m, v, u, t)*((u-t)/(v**2))
+    
+    return grads  # shape == (s,g,t)
+
+#----</Loss Gradients>-----
+
+def to_tanh(vals, rBot, rTop):
+    """Return vals normalized to tanh range.
+    rBot and rTop must match the shape of vals coming in.
+    """
+    return ((2*(vals-rBot)/(rTop-rBot)) - 1)
+    
+    
+def from_tanh(vals, rBot, rTop):
+    """Return vals expanded from tanh range.
+    """
+    return ((.5 + (vals/2)) * (rTop-rBot)) + rBot
+    
 #-----</Helper Functions>-----
 
 class GaussianMixtureModel(object):
@@ -176,6 +259,20 @@ class GaussianMixtureModel(object):
         
         return np.array(inRange, dtype=np.float32), np.array(outRange, dtype=np.float32)  # convert from list
         
+    def _expand_mvut(m, v, u, t):
+        """Return the expanded m, v, u, and t for broadcasting together.
+        """
+        # m.shape == (s,g)
+        # v.shape == (s,t)
+        # u.shape == (s,g,t)
+        # t.shape == (s,t)
+        
+        m = tf.expand_dims(m, 2)  # shape == (s,g,1)
+        v = tf.expand_dims(v, 1)  # shape == (s,1,t)
+        #u = u
+        t = tf.expand_dims(t, 1)  # shape == (s,1,t)
+        
+        return m, v, u, t
     def _weight_variable(self, shape):
         """Return weight matrix
         This initializes weight matrices for the ANN in this model.
@@ -201,9 +298,15 @@ class GaussianMixtureModel(object):
     
         #r: the range matrix
         #    [ [rb, rt]
+        #      [rb, rt]
         #      [rb, rt] ]
         r = tf.transpose(r)  # group rbot and rtop into rows
+        #r:
+        #    [ [rb, rb, rb]
+        #      [rt, rt, rt] ]
         rb, rt = tf.split(0, 2, r)  # split range bottom and range top (rb, rt) into two tensors.
+        #     rb = [rb, rb, rb]
+        #     rt = [rt, rt, rt]
     
         #expand dimensions until the defined rank is reached.
         addRank = rank - 1
@@ -402,23 +505,9 @@ class GaussianMixtureModel(object):
             
         with tf.name_scope('mixture_nll') as scope:
             
-            #prep terms of variance
-            #add a dimension of 1 to be broadcast over the 'g' dimension in other tensors.
-            v = tf.expand_dims(v, 1) #now tf.shape(v) == (s, 1, t)
-            v_norm = 1/(v*tf.sqrt(2*np.pi))
-            v_dem = 2*tf.square(v)
-            
-            #prep numerator term with corresponding sample target values and net proposed means
-            t = tf.expand_dims(t, 1) #add dim at 2nd position for broadcasting over means along dimension g.
-            tm_num = tf.square(t-u)
-            
-            #employ terms in pre-mixed likelihood function.
-            premix = v_norm*(tf.exp(-(tm_num/v_dem)))
-            #add dim for broadcasting mixing coefficients over t, the 3rd dimension.
-            m = tf.expand_dims(m, 2)
-            
-            #mix gaussian components
-            likelihood = m*premix
+            #expand dims
+            m, v, u, t = self._expand_mvut(m, v, u, t)
+            likelihood = tf_gaussian_likelihood(m, v, u, t)
             
             #sum over the likilihood of each target and gaussian component, don't reduce over samples yet.
             #FIXME i know the gaussian components are supposed to be summed, but i'm not sure about the various targets?
@@ -463,6 +552,10 @@ class GaussianMixtureModel(object):
         
         with tf.name_scope('loss_model') as scope:
             self._gmix_loss_nll()
+        
+        with tf.name_scope('calc_own_gradients') as scope:
+            #calculate the gradients of the activations attached to mvu, but outside of tensorflow.
+            self._calc_gradients()
         
         with tf.name_scope('train_step') as scope:
             optimizer = tf.train.GradientDescentOptimizer(learningRate)
@@ -510,9 +603,9 @@ class GaussianMixtureModel(object):
         rd['grad_w3']=inv_grad[rd['w3']]
         rd['grad_b3']=inv_grad[rd['b3']]
         
-        rd['grad_m']=grad_mvu[0]
-        rd['grad_v']=grad_mvu[1]
-        rd['grad_u']=grad_mvu[2]
+        rd['tf_grad_m']=grad_mvu[0]
+        rd['tf_grad_v']=grad_mvu[1]
+        rd['tf_grad_u']=grad_mvu[2]
         #-----</Update Reference Dict>-----
     def _get_refDict(self):
         """Return the reference dictionary holding tensorflow tensors.
@@ -530,6 +623,25 @@ class GaussianMixtureModel(object):
             trainBatchSize = self.x.shape[0]
         
         return iterations, testBatchSize, trainBatchSize
+        
+    def _calc_gradients():
+        """Adds calculated (outside of tf) gradients of the output activations to the reference dict.
+        These are not aggregated over the samples.
+        """
+        
+        rd = self.refDict
+        m = rd['m']
+        v = rd['v']
+        u = rd['u']
+        t = rd['t']
+        
+        m, v, u, t = self._expand_mvut(m, v, u, t)
+        
+        grad_m, grad_v, grad_u = tf_grad_mvu(m, v, u, t)
+        
+        self.refDict['calc_grad_m_activations']=grad_m
+        self.refDict['calc_grad_v_activations']=grad_v
+        self.refDict['calc_grad_u_activations']=grad_u
         
     def _tdb_nodes(self):
         """Add a list of tdb nodes for evaluation by tdb.debug
@@ -617,23 +729,23 @@ class GaussianMixtureModel(object):
         
         #----<Gradients Over X>-----
         #grad_m over x
-        p_grad_m = tdb.plot_op(viz.grad_m, inputs=[
+        p_grad_m = tdb.plot_op(viz.calc_grad_m, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
-                                                self.graph.as_graph_element(self.refDict['grad_m'])
+                                                self.graph.as_graph_element(self.refDict['calc_grad_m_activations'])
                                             ])
         nodeList.append(p_grad_m)
         
         #grad_v over x
-        p_grad_v = tdb.plot_op(viz.grad_v, inputs=[
+        p_grad_v = tdb.plot_op(viz.calc_grad_v, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
-                                                self.graph.as_graph_element(self.refDict['grad_v'])
+                                                self.graph.as_graph_element(self.refDict['calc_grad_v_activations'])
                                             ])
         nodeList.append(p_grad_v)
         
         #grad_u over x
-        p_grad_u = tdb.plot_op(viz.grad_u, inputs=[
+        p_grad_u = tdb.plot_op(viz.calc_grad_u, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
-                                                self.graph.as_graph_element(self.refDict['grad_u'])
+                                                self.graph.as_graph_element(self.refDict['calc_grad_u_activations'])
                                             ])
         nodeList.append(p_grad_u)
         #----<Gradients Over X>-----
@@ -693,9 +805,9 @@ class GaussianMixtureModel(object):
                                 self.refDict['grad_w3'], #14
                                 self.refDict['grad_b3'], #15
                                 
-                                self.refDict['grad_m'], #16
-                                self.refDict['grad_v'], #17
-                                self.refDict['grad_u'] #18
+                                self.refDict['tf_grad_m'], #16
+                                self.refDict['tf_grad_v'], #17
+                                self.refDict['tf_grad_u'] #18
                                 
                             ]
                             
@@ -743,9 +855,9 @@ class GaussianMixtureModel(object):
                         grad_w3=result[14],
                         grad_b3=result[15],
                         
-                        grad_m=result[16],
-                        grad_v=result[17],
-                        grad_u=result[18]
+                        tf_grad_m=result[16],
+                        tf_grad_v=result[17],
+                        tf_grad_u=result[18]
                         )
             
     def get_xmvu(self):

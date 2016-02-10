@@ -109,14 +109,14 @@ def variances(ctx, x, v):
     x1_yMany(x, v, xLabel='Input Range', yLabel='Standard Deviation', title='Standard Deviation Over X')
 
 #Error over X
-def grad_v(ctx, x, v):
-    x1_yMany(x, v, xLabel='Input Range', yLabel='Error', title='STD Error Over X')
+def calc_grad_v(ctx, x, v):
+    x1_yMany(x, v, xLabel='Input Range', yLabel='Error', title='Non TF calculated STD Error Over X')
 
-def grad_m(ctx, x, m):
-    x1_yMany(x, m, xLabel='Input Range', yLabel='Error', title='Mixing Coefficient Error Over X')
+def calc_grad_m(ctx, x, m):
+    x1_yMany(x, m, xLabel='Input Range', yLabel='Error', title='Non TF calculated Mixing Coefficient Error Over X')
 
-def grad_u(ctx, x, u):
-    help_means(x, u, yLabel='Error', title='Mean Error Over X')
+def calc_grad_u(ctx, x, u):
+    help_means(x, u, yLabel='Error', title='Non TF calculated Mean Error Over X')
 
 #Full sample of current mixture model
 def sample(ctx, x, m, v, u):
