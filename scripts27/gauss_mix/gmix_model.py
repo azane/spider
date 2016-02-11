@@ -752,7 +752,17 @@ class GaussianMixtureModel(object):
         rd['calc_agg_grad_w3'] = agg_func(rd['calc_grad_w3'], 0)
         
     def _tdb_nodes(self):
-        """Add a list of tdb nodes for evaluation by tdb.debug
+        """Adds a list of general purpose nodes for evaluation by tdb.debug
+        """
+        
+        nodeList = []
+        
+        
+        
+        self.refDict['tdb_nodes'] = nodeList
+        
+    def _2d_tdb_nodes(self):
+        """Add a list of tdb nodes, for a 2d problem, for evaluation by tdb.debug
         """
         nodeList = []
         
@@ -793,7 +803,7 @@ class GaussianMixtureModel(object):
         
         #loss over iterations
         p_loss = tdb.plot_op(viz.watch_loss, inputs=[
-                                                self.graph.as_graph_element(self.refDict['loss_nll'])
+                                                self.graph.as_graph_element(tf.reduce_mean(self.refDict['loss_nll'], 0))
                                             ])
         nodeList.append(p_loss)
         
@@ -914,7 +924,7 @@ class GaussianMixtureModel(object):
         
         #----</Report ops>----
         
-        self.refDict['tdb_nodes'] = nodeList
+        self.refDict['2d_tdb_nodes'] = nodeList
     
     def train(self, iterations=1000, testBatchSize=500, trainBatchSize=1000, reportEvery=10):
         with self.graph.as_default():
@@ -933,7 +943,7 @@ class GaussianMixtureModel(object):
             #----<Training Loop>----
             for i in iterations:
             
-                if i % reportEvery == 0: #run reports every 10 iterations.
+                if (i+1) % reportEvery == 0: #run reports every 10 iterations.
                     
                     #update feed_dict with test batch
                     feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x_test, self.t_test, testBatchSize)

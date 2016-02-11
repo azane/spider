@@ -1,4 +1,4 @@
-"""This is a pile of tdb visualization functions that can handle data of arbitrary dimensions (input/output data).
+"""This is a pile of tdb visualization functions that more or less depend on the data being 2d.
 """
 
 import matplotlib.pyplot as plt
@@ -6,6 +6,49 @@ import numpy as np
 import gmix_sample_mixture as smpl
 
 #----<helper functions>----
+def sort_by_x(x, y):
+    
+    #copy x and y before manipulating them
+    x = np.copy(x)
+    y = np.copy(y)
+    
+    #x and y should be 1d at this point .shape == [s,]
+    xy = np.column_stack((x,y))  # stack horizontally
+    xy = xy[xy[:,0].argsort()]  # sort by the x column
+    return xy[:,0], xy[:,1]  # re-separate x and y
+
+def sort_by_x1_yMany(x, y):
+    #copy x and y before manipulating them
+    x = np.copy(x) #x should be 1d, [s,]
+    y = np.copy(y)
+    
+    y_ = y[x.argsort()] #sort y by the x's
+    x_ = x[x.argsort()]
+    
+    return x_, y_
+    
+def x1_yMany(x, y, xLabel='', yLabel='', title=''):
+    
+    #x.shape == [s,x]
+    #y.shape == [s,t/y]
+    
+    #copy x and y before manipulating them
+    x = np.copy(x)
+    y = np.copy(y)
+    
+    
+    x_hold = x[:,0]  # select the 1st input dimension
+    
+    #iterate the output dimensions, plotting each line with the original x values.
+    for outDim in range(y.shape[1]):
+        y_ = y[:,outDim]
+        x_, y_ = sort_by_x(x_hold, y_)
+        plt.plot(x_, y_)
+    
+    plt.xlabel(xLabel)
+    plt.ylabel(yLabel)
+    plt.title(title)
+    
 def watch(ctx, y, yLabel='', title=''):
     if not hasattr(ctx, 'history'):
         ctx.history = []
@@ -16,6 +59,27 @@ def watch(ctx, y, yLabel='', title=''):
     plt.xlabel('Iterations')
     plt.ylabel(yLabel)
     plt.title(title)
+
+def help_means(x, u, xLabel='Input Range', yLabel='Output Range', title='Means'):
+    #x.shape == [s,x]
+    #u.shape == [s,g,t]
+    #graph g lines on t graphs
+    
+    #get subplot rows/cols, make rectangle as close to a square as possible
+    numSubplt = u.shape[2]
+    sideSubplt = np.sqrt(numSubplt)
+    rows = int(sideSubplt)# + 1
+    if ((sideSubplt-rows) > 0):
+        cols = rows + 1
+    else:
+        cols = rows
+    
+    #iterate t
+    #   plot g lines, then write a subplot after g's are finished.
+    for outDim in range(u.shape[2]):
+        #make plot of all g's for this subplot.
+        x1_yMany(x, u[:,:,outDim], xLabel=xLabel, yLabel=yLabel, title=title)
+        plt.subplot(rows, cols, (outDim+1))
 
 def subs_over1X(x, w, xLabel='Input Range', yLabel='', title=''):
     #stolen, with some mods, from tdb viz example.
