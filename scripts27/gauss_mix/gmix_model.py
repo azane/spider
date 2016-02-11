@@ -581,16 +581,15 @@ class GaussianMixtureModel(object):
             #custom train step applies the calculated and aggregated gradients.
             #   to modify the construction of these gradients,
             #   simply modify self._calc_wb_gradients_from_tf_activations
-            custom_train_step = optimizer.apply_gradients([
-                                                            (rd['calc_agg_grad_b1'], rd['b1']),
-                                                            (rd['calc_agg_grad_b2'], rd['b2']),
-                                                            (rd['calc_agg_grad_b3'], rd['b3']),
-                                                            
-                                                            (rd['calc_agg_grad_w1'], rd['w1']),
-                                                            (rd['calc_agg_grad_w2'], rd['w2']),
-                                                            (rd['calc_agg_grad_w3'], rd['w3'])
-                                                        ]
-                                                    )
+            custom_train_step = [
+                                    rd['b1'].assign_sub(rd['calc_agg_grad_b1']),
+                                    rd['b2'].assign_sub(rd['calc_agg_grad_b2']),
+                                    rd['b3'].assign_sub(rd['calc_agg_grad_b3']),
+                                    
+                                    rd['w1'].assign_sub(rd['calc_agg_grad_w1']),
+                                    rd['w2'].assign_sub(rd['calc_agg_grad_w2']),
+                                    rd['w3'].assign_sub(rd['calc_agg_grad_w3'])
+                                ]
         
         sess = tf.Session()
         
@@ -688,7 +687,7 @@ class GaussianMixtureModel(object):
         #calculate layer errors over s.
         grad_activations = tf.gradients(self.refDict['loss_nll'], [ 
                                                                     self.refDict['lay1'],
-                                                                    self.refDict['lay2']
+                                                                    self.refDict['lay2'],
                                                                     self.refDict['netOut']
                                                                 ])
         #store in reference dict for more convenient naming.
@@ -700,7 +699,7 @@ class GaussianMixtureModel(object):
         #the bias gradients are the activation gradients. multiply by the learning rate first.
         rd['calc_grad_b1'] = rd['grad_lay1'] * self.learningRate
         rd['calc_grad_b2'] = rd['grad_lay2'] * self.learningRate
-        rd['calc_grad_b1'] = rd['grad_lay3'] * self.learningRate
+        rd['calc_grad_b3'] = rd['grad_netOut'] * self.learningRate
         
         #the weight gradients are the previous layer's activations multiplied by the error gradient in the output.
         #change so that ins.shape == (s,inSize,1) and outs.shape == (s,1,outSize)
@@ -710,11 +709,11 @@ class GaussianMixtureModel(object):
         
         grad_lay1_ = tf.expand_dims(rd['grad_lay1'], 1)  # .shape == (s, 1, outSize)
         grad_lay2_ = tf.expand_dims(rd['grad_lay2'], 1)
-        grad_lay3_ = tf.expand_dims(rd['grad_lay3'], 1)
+        grad_netOut_ = tf.expand_dims(rd['grad_netOut'], 1)
         
         rd['calc_grad_w1'] = netIn_ * grad_lay1_ * self.learningRate
         rd['calc_grad_w2'] = lay1_ * grad_lay2_ * self.learningRate
-        rd['calc_grad_w3'] = lay2_ * grad_lay3_ * self.learningRate
+        rd['calc_grad_w3'] = lay2_ * grad_netOut_ * self.learningRate
         
         #aggregate over samples with the average!
         agg_func = tf.reduce_mean
@@ -732,6 +731,25 @@ class GaussianMixtureModel(object):
         nodeList = []
         
         #----<Plots>----
+        
+        #weight error
+        p_w1e = tdb.plot_op(viz.weights1, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['calc_grad_w1'])
+                                            ])
+        nodeList.append(p_w1e)
+        
+        p_w2e = tdb.plot_op(viz.weights2, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['calc_grad_w2'])
+                                            ])
+        nodeList.append(p_w2e)
+        
+        p_w3e = tdb.plot_op(viz.weights3, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['calc_grad_w3'])
+                                            ])
+        nodeList.append(p_w3e)
         
         #mixing coefficients full update
         p_xm = tdb.plot_op(viz.mixing_coefficients, inputs=[
@@ -946,9 +964,8 @@ class GaussianMixtureModel(object):
                 else:
                     #update feed_dict with training batch
                     feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x, self.t, trainBatchSize)
-                    self.refDict['sess'].run([
-                                            self.refDict['tf_train_step']
-                                        ], feed_dict=feed_dict) #run tf_train_step with training batch
+                    #custom train step is a list itself, the returned value is a list of variable values after the training.
+                    self.refDict['sess'].run(self.refDict['custom_train_step'], feed_dict=feed_dict)
             #----<Training Loop>----
             
             #for notebook testing.

@@ -39,6 +39,16 @@ def sort_by_x(x, y):
     xy = np.column_stack((x,y))  # stack horizontally
     xy = xy[xy[:,0].argsort()]  # sort by the x column
     return xy[:,0], xy[:,1]  # re-separate x and y
+
+def sort_by_x1_yMany(x, y):
+    #copy x and y before manipulating them
+    x = np.copy(x) #x should be 1d, [s,]
+    y = np.copy(y)
+    
+    y_ = y[x.argsort()] #sort y by the x's
+    x_ = x[x.argsort()]
+    
+    return x_, y_
     
 def x1_yMany(x, y, xLabel='', yLabel='', title=''):
     
@@ -76,13 +86,12 @@ def watch(ctx, y, yLabel='', title=''):
 def help_means(x, u, xLabel='Input Range', yLabel='Output Range', title='Means'):
     #x.shape == [s,x]
     #u.shape == [s,g,t]
-    
     #graph g lines on t graphs
     
     #get subplot rows/cols, make rectangle as close to a square as possible
     numSubplt = u.shape[2]
     sideSubplt = np.sqrt(numSubplt)
-    rows = int(sideSubplt)
+    rows = int(sideSubplt)# + 1
     if ((sideSubplt-rows) > 0):
         cols = rows + 1
     else:
@@ -94,16 +103,44 @@ def help_means(x, u, xLabel='Input Range', yLabel='Output Range', title='Means')
         #make plot of all g's for this subplot.
         x1_yMany(x, u[:,:,outDim], xLabel=xLabel, yLabel=yLabel, title=title)
         plt.subplot(rows, cols, (outDim+1))
+
+def subs_over1X(x, w, xLabel='Input Range', yLabel='', title=''):
+    #stolen, with some mods, from tdb viz example.
+    
+    x = np.squeeze(np.copy(x))
+    assert x.ndim == 1, "This function requires that x can be squeezed to 1 dimension."
+    w = np.copy(w)
+    
+    x, w = sort_by_x1_yMany(x, w)
+    
+    n = int(np.ceil(np.sqrt(w.shape[2]))) # force square 
+    f, axes = plt.subplots(n,n,sharex=True,sharey=True)
+    f.suptitle(title)
+    
+    for i in range(w.shape[2]): # for each target
+        r,c=i//n,i%n
+        axes[r,c].plot(x, np.squeeze(w[:,:,i]))
+        axes[r,c].set_title("[:,:," + str(i) + "]")
+        axes[r,c].get_xaxis().set_visible(False)
+        axes[r,c].get_yaxis().set_visible(False)
 #----</helper functions>----
 
 
 #----<CTX functions>----
+def weights1(ctx, x, w):
+    subs_over1X(x, w, yLabel='dE/dW', title='Layer 1 Weight Error Over X')
+def weights2(ctx, x, w):
+    subs_over1X(x, w, yLabel='dE/dW', title='Layer 2 Weight Error Over X')
+def weights3(ctx, x, w):
+    subs_over1X(x, w, yLabel='dE/dW', title='Layer 3 Weight Error Over X')
+
 #Outputs
 def mixing_coefficients(ctx, x, g):
     x1_yMany(x, g, xLabel='Input Range', yLabel='Relevance', title='Mixing Coefficients over X')
 
 def means(ctx, x, u):
     help_means(x, u)
+    #subs_over1X(x, u, title='Means')
 
 def variances(ctx, x, v):
     x1_yMany(x, v, xLabel='Input Range', yLabel='Standard Deviation', title='Standard Deviation Over X')
@@ -117,6 +154,7 @@ def calc_grad_m(ctx, x, m):
 
 def calc_grad_u(ctx, x, u):
     help_means(x, u, yLabel='Error', title='Non TF calculated Mean Error Over X')
+    #subs_over1X(x, u, title='Non TF calculated Mean Error Over X')
 
 
 def tf_grad_v(ctx, x, v):
@@ -128,6 +166,7 @@ def tf_grad_m(ctx, x, m):
 
 def tf_grad_u(ctx, x, u):
     help_means(x, u, yLabel='Error', title='TF Mean Error Over X')
+    #subs_over1X(x, u, title='TF Mean Error Over X')
 
 def tf_grad_netOut(ctx, x, netOut):
     x1_yMany(x, netOut, xLabel='Input Range', yLabel='Net Out Gradients', title='TF Net Out Gradients')
