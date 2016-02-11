@@ -126,18 +126,40 @@ def tf_grad_u(m, v, u, t):
     return grads  # shape == (s,g,t)
 
 #----</Loss Gradients>-----
+#TODO turn these all into one function taking the destination range
+#       it's a BIT redundant. a bit.
+def to_zeroToOne(vals, rBot, rTop):
+    return (vals-rBot)/(rTop-rBot)
+def from_zeroToOne(vals, rBot, rTop):
+    return (vals*(rTop-rBot))+rBot
 
-def to_tanh(vals, rBot, rTop):
-    """Return vals normalized to tanh range.
+def to_tanh_output(vals, rBot, rTop):
+    """Return vals normalized to tanh output, (-1,1).
+    rBot and rTop must match the broadcastable to vals coming in.
+    """
+    zeroToOne = to_zeroToOne(vals, rBot, rTop)
+    return (zeroToOne*2.)-1.
+    
+def from_tanh_output(vals, rBot, rTop):
+    """Return vals expanded from tanh output range (-1,1).
+    """
+    zeroToOne = (vals+1.)/2.
+    return from_zeroToOne(zeroToOne, rBot, rTop)
+
+
+def to_tanh_input(vals, rBot, rTop):
+    """Return vals normalized to tanh input range [-2.5, 2.5].
     rBot and rTop must match the shape of vals coming in.
     """
-    return ((2*(vals-rBot)/(rTop-rBot)) - 1)
+    zeroToOne = to_zeroToOne(vals, rBot, rTop)
+    return (zeroToOne*5.)-2.5
     
     
-def from_tanh(vals, rBot, rTop):
-    """Return vals expanded from tanh range.
+def from_tanh_input(vals, rBot, rTop):
+    """Return vals expanded from tanh input range [-2.5, 2.5].
     """
-    return ((.5 + (vals/2)) * (rTop-rBot)) + rBot
+    zeroToOne = (vals+2.5)/5
+    return from_zeroToOne(zeroToOne, rBot, rTop)
     
 #-----</Helper Functions>-----
 
@@ -370,8 +392,8 @@ class GaussianMixtureModel(object):
         eROutB, eROutT= self._shape_range_for_elementwise(self.outRange, rank=3)
         
         #summary ops
-        x_hist = tf.histogram_summary("x", fullIn)
-        t_hist = tf.histogram_summary("t", fullOut_)
+        #x_hist = tf.histogram_summary("x", fullIn)
+        #t_hist = tf.histogram_summary("t", fullOut_)
         #-----</Placeholder Construction>-----
         
         
@@ -401,8 +423,8 @@ class GaussianMixtureModel(object):
         
         #-----<ANN Execution>-----
         with tf.name_scope('ANN_exec') as scope:
-            # massage inputs to tanh range [-1,1]
-            netIn = (2*(fullIn-eRInB)/(eRInT-eRInB)) - 1
+            # massage inputs to tanh range (-2.5,2.5)
+            netIn = to_tanh_input(fullIn, rBot=eRInB, rTop=eRInT)
             
             ##TODO FIXME I'm going to need to calculate the weight and bias gradients...
             #               but that's all it seems to be getting wrong. the layer activations seem correct.
@@ -438,16 +460,17 @@ class GaussianMixtureModel(object):
             #this doesn't make tf calculate a zero gradient? HOW!? is this being used elsewhere?
             #   apparently there's still a way to change var that matters?
             #varRaw = varRaw*0 #var should be 1
-            
             #variances
             #varScale = tf.Variable(2.0) #TODO is this a good idea?
-            var = tf.exp(tf.mul(varRaw, 1.0)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
+            var = tf.exp(tf.mul(varRaw, 3.0)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
+            #var = from_tanh(var, rBot=eROutB, rTop=eROutT)
             
             
         with tf.name_scope('massage_mean') as scope:
             #mean
             #expand to output range
-            mean = ((.5 + (meanRaw/2)) * (eROutT-eROutB)) + eROutB #this scales from relevant tanh output (-1,1)
+            #mean = ((.5 + (meanRaw/2)) * (eROutT-eROutB)) + eROutB #this scales from relevant tanh output (-1,1)
+            mean = from_tanh_output(meanRaw, rBot=eROutB, rTop=eROutT)
             
         #summary ops
         mix_hist = tf.histogram_summary("Mixing Coefficients", mix)
@@ -458,9 +481,10 @@ class GaussianMixtureModel(object):
         #-----<Update Reference Dict>-----
         
         #FIXME this is a workaround for x retrievals that say, "fed and fetched, you suck"
-        fetchX = ((.5 + (netIn/2)) * (eROutT-eROutB)) + eROutB  # expand from tanh
-        mid_fetchT = (2*(fullOut_-eRInB)/(eRInT-eRInB)) - 1
-        fetchT = ((.5 + (mid_fetchT/2)) * (eROutT-eROutB)) + eROutB  # expand from tanh
+        fetchX = from_tanh_input(netIn, rBot=eRInB, rTop=eRInT)
+        #do stuff so it thinks we aren't just fetching a feed. BLAGH! there's a better way.
+        mid_fetchT = to_zeroToOne(fullOut_, rBot=eROutB, rTop=eROutT)
+        fetchT = from_zeroToOne(mid_fetchT, rBot=eROutB, rTop=eROutT)
         
         #this section updates the instance dictionary that can be used from outside to run tensorflow output and to fill placeholders.
         rd = self.refDict
@@ -532,7 +556,8 @@ class GaussianMixtureModel(object):
             Trying something. remove the summation over the samples, and let this be aggregated over the weights in the end."""
             #take natural log of sum, then reduce over samples, then negate for the final negative log likelihood
             #nll = -tf.reduce_sum(tf.log(tot_likelihood)) #this reduces along the final dimension, so nll will be a scalar. #disabled: 38ndksl3ihk
-            nll = -tf.log(tot_likelihood) #38ndksl3ihk
+            #add 1e-5 to prevent infs.
+            nll = -tf.log(tot_likelihood+1e-5) #38ndksl3ihk
             
             #summary ops
             likelihood_hist = tf.histogram_summary("Post-mixed Likelihood", likelihood)
@@ -541,6 +566,7 @@ class GaussianMixtureModel(object):
             nll_hist = tf.scalar_summary("Negative Log Likelihood", tf.reduce_sum(nll)) #38ndksl3ihk
             
         #-----<Update Reference Dict>-----
+        self.refDict['tot_likelihood'] = tot_likelihood
         self.refDict['loss_nll'] = nll
         #-----</Update Reference Dict>-----
         
@@ -945,7 +971,9 @@ class GaussianMixtureModel(object):
                                 self.refDict['calc_agg_grad_w2'], #21
                                 self.refDict['calc_agg_grad_b2'], #22
                                 self.refDict['calc_agg_grad_w3'], #23
-                                self.refDict['calc_agg_grad_b3'] #24
+                                self.refDict['calc_agg_grad_b3'], #24
+                                
+                                self.refDict['tot_likelihood'] #25
                             ]
                             
                     evals.extend(self.refDict['tdb_nodes']) #extend with the list of tensorflow debugger nodes
@@ -1000,7 +1028,9 @@ class GaussianMixtureModel(object):
                         calc_agg_grad_w2=result[21],
                         calc_agg_grad_b2=result[22],
                         calc_agg_grad_w3=result[23],
-                        calc_agg_grad_b3=result[24]
+                        calc_agg_grad_b3=result[24],
+                        
+                        tot_likelihood=result[25]
                         )
             
     def get_xmvu(self):
