@@ -44,6 +44,6 @@ if __name__ == "__main__":
         y, x = gen_sample2(int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]))
     else:
         x, y = gen_sample2(int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4])) #take the second argument as the sample size
-
+        
     #write file to passed path, first argument.
     np.savez(sys.argv[1], x=x, y=y)

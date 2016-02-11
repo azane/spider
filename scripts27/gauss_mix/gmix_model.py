@@ -3,21 +3,22 @@ import numpy as np
 import sys
 from gmix_sample_mixture import sample_mixture
 import gmix_tdbviz as viz
+import gmix_2d_tdbviz as viz2d
 import tdb as tdb
 
 SUMMARY_DIRECTORY = "/Users/azane/GitRepo/spider/data/gauss_mix_logs" #directory in which summary files are stored
 
 #-----<Helper Functions>-----
-def get_xt_from_npz(npz_path):
+def get_xt_from_npz(npz_path, allow_pickle=False):
     """Return x and t
         
-        This function reads an npz file, verifies xt, and returns the unpacked arrays.
+        This function reads an npz file, and returns the unpacked arrays.
         
         'x' must be under npz['x']
         't' must be under either npz['t'] or npz['y']
     """
     
-    with np.load(npz_path, allow_pickle=False) as xt:
+    with np.load(npz_path, allow_pickle=allow_pickle) as xt:
         x = xt['x']
         try:
             t = xt['t']
@@ -126,6 +127,8 @@ def tf_grad_u(m, v, u, t):
     return grads  # shape == (s,g,t)
 
 #----</Loss Gradients>-----
+
+#----<Range Normalization Functions>-----
 #TODO turn these all into one function taking the destination range
 #       it's a BIT redundant. a bit.
 def to_zeroToOne(vals, rBot, rTop):
@@ -160,7 +163,8 @@ def from_tanh_input(vals, rBot, rTop):
     """
     zeroToOne = (vals+2.5)/5
     return from_zeroToOne(zeroToOne, rBot, rTop)
-    
+#----</Range Normalization Functions>-----
+
 #-----</Helper Functions>-----
 
 class GaussianMixtureModel(object):
@@ -177,15 +181,6 @@ class GaussianMixtureModel(object):
         #     we'll also need to control which instances get summaries written for them. just with a flag probs.
         
         #TODO make the variable naming more consistent throughout functions. it's confusing...slash, that may come with making it a class.
-        
-        #TODO where possible, convert range conversions to this process:
-        #   data -= data.min() #make 0 base
-        #   data /= data.max() #divide by maximum
-        #   data *= 2 #multiply 0-1 range for [0,2] range
-        #   data -= 1 #subtract one to shift for [-1,1] range.
-        #   #FIXME actually, this may not work very well, because a sample batch may not capture the range the spider decides it wants to search over. : /
-        #   #       but i'm still overcomplicating the math. this is better.
-        #   #FIXME also, to expand the range back out, it needs to remember it...so maybe my current method is so far gone?
         
     def __init__(self, x, t, x_test, t_test, inDims=None, outDims=None, inRange=None, outRange=None, numGaussianComponents=5, hiddenLayerSize=15, learningRate=0.01):
         
@@ -208,7 +203,9 @@ class GaussianMixtureModel(object):
                 self.inDims = self._infer_space(x, t)[0]
             if outDims is None:
                 self.outDims = self._infer_space(x, t)[1]
-        
+                
+            #NOTE the range can, and often is, inferred from the data, but the user of this class needs the flexibility
+            #       to define ranges not fully represented by the data.
             if inRange is None:
                 self.inRange = self._infer_ranges(x, t)[0]
             if outRange is None:
@@ -757,7 +754,59 @@ class GaussianMixtureModel(object):
         
         nodeList = []
         
+        #loss over iterations
+        p_loss = tdb.plot_op(viz.watch_loss, inputs=[
+                                                self.graph.as_graph_element(tf.reduce_mean(self.refDict['loss_nll'], 0))
+                                            ])
+        nodeList.append(p_loss)
         
+        #---<W1>---
+        #w1 over iterations
+        p_watch_w1 = tdb.plot_op(viz.watch_weights, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w1'])
+                                            ])
+        nodeList.append(p_watch_w1)
+        
+        #w1 as squares
+        p_square_w1 = tdb.plot_op(viz.weight_squares, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w1'])
+                                            ])
+        #nodeList.append(p_square_w1)
+        
+        #w1 as hist
+        p_hist_w1 = tdb.plot_op(viz.weight_hist, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w1'])
+                                            ])
+        nodeList.append(p_hist_w1)
+        #---</W1>---
+        
+        #---<B1>---
+        #biases of layer 1 over iterations
+        p_watch_b1 = tdb.plot_op(viz.watch_biases, inputs=[
+                                                self.graph.as_graph_element(self.refDict['b1'])
+                                            ])
+        nodeList.append(p_watch_b1)
+        #---</B1>---
+        
+        #---<W2>---
+        #w2 over iterations
+        p_watch_w2 = tdb.plot_op(viz.watch_weights, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w2'])
+                                            ])
+        nodeList.append(p_watch_w2)
+        
+        #w2 as squares
+        p_square_w2 = tdb.plot_op(viz.weight_squares, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w2'])
+                                            ])
+        #nodeList.append(p_square_w2)
+        
+        #w2 as hist
+        p_hist_w2 = tdb.plot_op(viz.weight_hist, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w2'])
+                                            ])
+        nodeList.append(p_hist_w2)
+        #---</W2>---
         
         self.refDict['tdb_nodes'] = nodeList
         
@@ -769,46 +818,46 @@ class GaussianMixtureModel(object):
         #----<Plots>----
         
         #weight error
-        p_w1e = tdb.plot_op(viz.weights1, inputs=[
+        p_w1e = tdb.plot_op(viz2d.weights1, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['calc_grad_w1'])
                                             ])
         nodeList.append(p_w1e)
         
-        p_w2e = tdb.plot_op(viz.weights2, inputs=[
+        p_w2e = tdb.plot_op(viz2d.weights2, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['calc_grad_w2'])
                                             ])
         nodeList.append(p_w2e)
         
-        p_w3e = tdb.plot_op(viz.weights3, inputs=[
+        p_w3e = tdb.plot_op(viz2d.weights3, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['calc_grad_w3'])
                                             ])
         nodeList.append(p_w3e)
         
         #mixing coefficients full update
-        p_xm = tdb.plot_op(viz.mixing_coefficients, inputs=[
+        p_xm = tdb.plot_op(viz2d.mixing_coefficients, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['m'])
                                             ])
         nodeList.append(p_xm)
         
         #variances full update
-        p_xv = tdb.plot_op(viz.variances, inputs=[
+        p_xv = tdb.plot_op(viz2d.variances, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['v'])
                                             ])
         nodeList.append(p_xv)
         
         #loss over iterations
-        p_loss = tdb.plot_op(viz.watch_loss, inputs=[
+        p_loss = tdb.plot_op(viz2d.watch_loss, inputs=[
                                                 self.graph.as_graph_element(tf.reduce_mean(self.refDict['loss_nll'], 0))
                                             ])
         nodeList.append(p_loss)
         
         #full 2d sampling of model.
-        p_sample = tdb.plot_op(viz.sample, inputs=[
+        p_sample = tdb.plot_op(viz2d.sample, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['m']),
                                                 self.graph.as_graph_element(self.refDict['v']),
@@ -817,35 +866,35 @@ class GaussianMixtureModel(object):
         nodeList.append(p_sample)
         
         #sample means
-        p_xu = tdb.plot_op(viz.means, inputs=[
+        p_xu = tdb.plot_op(viz2d.means, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['u'])
                                             ])
         nodeList.append(p_xu)
         
         #lay1
-        p_lay1 = tdb.plot_op(viz.lay1_overX, inputs=[
+        p_lay1 = tdb.plot_op(viz2d.lay1_overX, inputs=[
                                                             self.graph.as_graph_element(self.refDict['fetchX']),
                                                             self.graph.as_graph_element(self.refDict['lay1'])
                                                         ])
         #nodeList.append(p_lay1)
         
         #lay2
-        p_lay2 = tdb.plot_op(viz.lay2_overX, inputs=[
+        p_lay2 = tdb.plot_op(viz2d.lay2_overX, inputs=[
                                                             self.graph.as_graph_element(self.refDict['fetchX']),
                                                             self.graph.as_graph_element(self.refDict['lay2'])
                                                         ])
         #nodeList.append(p_lay2)
         
         #net out
-        p_netout = tdb.plot_op(viz.netOut_overX, inputs=[
+        p_netout = tdb.plot_op(viz2d.netOut_overX, inputs=[
                                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                                 self.graph.as_graph_element(self.refDict['netOut'])
                                                             ])
         nodeList.append(p_netout)
         
         #report on net calculations outside of tensorflow.
-        p_ann = tdb.plot_op(viz.report_net, inputs=[
+        p_ann = tdb.plot_op(viz2d.report_net, inputs=[
                                                                 self.graph.as_graph_element(self.refDict['w1']),
                                                                 self.graph.as_graph_element(self.refDict['b1']),
                                                                 self.graph.as_graph_element(self.refDict['w2']),
@@ -857,7 +906,7 @@ class GaussianMixtureModel(object):
         #nodeList.append(p_ann)
         
         #training data
-        p_training_data = tdb.plot_op(viz.training_data, inputs=[
+        p_training_data = tdb.plot_op(viz2d.training_data, inputs=[
                                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                                 self.graph.as_graph_element(self.refDict['fetchT'])
                                                             ])
@@ -866,21 +915,21 @@ class GaussianMixtureModel(object):
         
         #----<Gradients Over X>-----
         #grad_m over x
-        p_grad_m = tdb.plot_op(viz.calc_grad_m, inputs=[
+        p_grad_m = tdb.plot_op(viz2d.calc_grad_m, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['calc_grad_m_activations'])
                                             ])
         nodeList.append(p_grad_m)
         
         #grad_v over x
-        p_grad_v = tdb.plot_op(viz.calc_grad_v, inputs=[
+        p_grad_v = tdb.plot_op(viz2d.calc_grad_v, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['calc_grad_v_activations'])
                                             ])
         nodeList.append(p_grad_v)
         
         #grad_u over x
-        p_grad_u = tdb.plot_op(viz.calc_grad_u, inputs=[
+        p_grad_u = tdb.plot_op(viz2d.calc_grad_u, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['calc_grad_u_activations'])
                                             ])
@@ -888,21 +937,21 @@ class GaussianMixtureModel(object):
         
         
         #grad_m over x
-        p_tf_grad_m = tdb.plot_op(viz.tf_grad_m, inputs=[
+        p_tf_grad_m = tdb.plot_op(viz2d.tf_grad_m, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['tf_grad_m'])
                                             ])
         nodeList.append(p_tf_grad_m)
         
         #grad_v over x
-        p_tf_grad_v = tdb.plot_op(viz.tf_grad_v, inputs=[
+        p_tf_grad_v = tdb.plot_op(viz2d.tf_grad_v, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['tf_grad_v'])
                                             ])
         nodeList.append(p_tf_grad_v)
         
         #grad_u over x
-        p_tf_grad_u = tdb.plot_op(viz.tf_grad_u, inputs=[
+        p_tf_grad_u = tdb.plot_op(viz2d.tf_grad_u, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['tf_grad_u'])
                                             ])
@@ -910,7 +959,7 @@ class GaussianMixtureModel(object):
         
         
         #grad_netOut over x
-        p_tf_grad_netOut = tdb.plot_op(viz.tf_grad_netOut, inputs=[
+        p_tf_grad_netOut = tdb.plot_op(viz2d.tf_grad_netOut, inputs=[
                                                 self.graph.as_graph_element(self.refDict['fetchX']),
                                                 self.graph.as_graph_element(self.refDict['grad_netOut'])
                                             ])
@@ -1051,7 +1100,7 @@ class GaussianMixtureModel(object):
                             self.refDict['inRange']:self.inRange,
                             self.refDict['outRange']:self.outRange
                         }
-        
+                        
             #evaluate the trained model at m, v, and u with the test data.
             result = self.refDict['sess'].run([
                                             self.refDict['m'],

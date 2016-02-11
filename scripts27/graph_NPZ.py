@@ -19,6 +19,27 @@ def scale(x, index, low, high):
     #return an array after discarding points outside of the range.
     return x[:,(x[index]>low) & (x[index]<high)]#select column indices within the range.
 
+def init4d(x, y):
+    assert y.ndim == 1
+    assert x.ndim == 2
+    assert x.shape[0] == 3
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d') #create subplot in figure.
+    
+    #set the color map to the output dimension.
+    scatPlot = ax.scatter(x[0], x[1], x[2], c=y) #create plot
+    
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
+    
+    #add colorbar label
+    cb = fig.colorbar(scatPlot)
+    cb.set_label("y")
+    
+    return fig, scatPlot
+
 def init3d(x, y):
     assert y.ndim == 1 #exactly 1 output
     assert x.ndim == 2 #exactly 2d
@@ -65,6 +86,6 @@ if x.shape[0] > lim:
 
 for t in range(y.shape[1]):
     #x is only transposed so x.shape == (inputdimensions, s), while each y output is taken so y.shape == (s,)
-    init2d(np.squeeze(x.transpose()), np.squeeze(y[:,t])) #select single output, transpose x to match now that y is a 1d row of shape (s,)
+    init4d(np.squeeze(x.transpose()), np.squeeze(y[:,t])) #select single output, transpose x to match now that y is a 1d row of shape (s,)
 
 plt.show()

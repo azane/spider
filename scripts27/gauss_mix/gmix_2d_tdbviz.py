@@ -1,4 +1,5 @@
 """This is a pile of tdb visualization functions that more or less depend on the data being 2d.
+It's messy...frantic debugging. : )
 """
 
 import matplotlib.pyplot as plt
