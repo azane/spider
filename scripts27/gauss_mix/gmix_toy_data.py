@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 
-"""command line: python this.py <str: outfilepath.npz> <int: sample size> <float: variance>"""
+"""command line: python this.py <str: outfilepath.npz> <int: sample size> <float: variance> <str: noinversion>"""
 
 #Generate a 2d pile of sample data as seen on page 273 in Bishop's ML book.
 
@@ -23,7 +23,10 @@ def gen_sample(s, v):
 
 
 if __name__ == "__main__":
-    x, y = gen_sample(int(sys.argv[2]), float(sys.argv[3])) #take the second argument as the sample size
+    if sys.argv[4] == 'noinversion':
+        y, x = gen_sample(int(sys.argv[2]), float(sys.argv[3]))
+    else:
+        x, y = gen_sample(int(sys.argv[2]), float(sys.argv[3])) #take the second argument as the sample size
 
     #write file to passed path, first argument.
     np.savez(sys.argv[1], x=x, y=y)

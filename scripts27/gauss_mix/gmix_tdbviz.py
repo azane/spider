@@ -118,6 +118,21 @@ def calc_grad_m(ctx, x, m):
 def calc_grad_u(ctx, x, u):
     help_means(x, u, yLabel='Error', title='Non TF calculated Mean Error Over X')
 
+
+def tf_grad_v(ctx, x, v):
+    x1_yMany(x, v, xLabel='Input Range', yLabel='Error', title='TF STD Error Over X')
+
+def tf_grad_m(ctx, x, m):
+    x1_yMany(x, m, xLabel='Input Range', yLabel='Error', title='TF Mixing Coefficient Error Over X')
+    #plt.ylim(-2,1)
+
+def tf_grad_u(ctx, x, u):
+    help_means(x, u, yLabel='Error', title='TF Mean Error Over X')
+
+def tf_grad_netOut(ctx, x, netOut):
+    x1_yMany(x, netOut, xLabel='Input Range', yLabel='Net Out Gradients', title='TF Net Out Gradients')
+
+
 #Full sample of current mixture model
 def sample(ctx, x, m, v, u):
     x, y = smpl.sample_mixture(x, m, v, u)

@@ -33,11 +33,10 @@ def tf_gaussian_likelihood(m, v, u, t):
     This requires that m,v,u,t can all be broadcast together.
     """
     
-    assert tf.rank(m) = tf.rank(v) and tf.rank(u) == tf.rank(t) and tf.rank(m) == tf.rank(u), \
-            "m,v,u,t must all be pre-expanded and able to be broadcast together."
-    #TODO add checks for broadcast worthy shapes.
+    #TODO FIXME how does tf handle verification? like that mvut can be broadcast together!?
     
     with tf.name_scope('normal_likelihood') as scope:
+        
         #prep terms of variance
         v_norm = 1/(v*tf.sqrt(2*np.pi))  # the normalizing term
         v_dem = 2*tf.square(v)  # the denominator in the exp
@@ -49,7 +48,10 @@ def tf_gaussian_likelihood(m, v, u, t):
         premix = v_norm*(tf.exp(-(tm_num/v_dem)))
         
         #mix gaussian components
-        likelihood = m*premix
+        #FIXME dkgni19dfohkjodnah9 didn't fix the flatlining problem...no difference in weight/bias gradient overload either.
+        #dkgni19dfohkjodnah9 trying something. m error gradient is wrong, so use 1 component, and don't calculate it.
+        likelihood = m*premix #disabled dkgni19dfohkjodnah9
+        #likelihood = (m/m)*premix #dkgni19dfohkjodnah9
         
     return likelihood  # tf.shape(likelihood) == (s,g,t)
 
@@ -105,7 +107,7 @@ def tf_grad_v(m, v, u, t):
     """
     
     #compute the gradients
-    grads = -1*tf_gmm_likelihood_k(m, v, u, t)*((((t-u)**2)/(v**3))-(1/v))
+    grads = -1*tf_gmm_likelihood_k(m, v, u, t)*((tf.pow((t-u), 2)/tf.pow(v, 3))-(1/v))
     
     #aggregate over the gaussian components, as variance is by t.
     #   preserve s for visualizing over x
@@ -119,7 +121,7 @@ def tf_grad_u(m, v, u, t):
     """
     
     #compute the gradients
-    grads = tf_gmm_likelihood_k(m, v, u, t)*((u-t)/(v**2))
+    grads = tf_gmm_likelihood_k(m, v, u, t)*((u-t)/tf.pow(v, 2))
     
     return grads  # shape == (s,g,t)
 
@@ -259,7 +261,7 @@ class GaussianMixtureModel(object):
         
         return np.array(inRange, dtype=np.float32), np.array(outRange, dtype=np.float32)  # convert from list
         
-    def _expand_mvut(m, v, u, t):
+    def _expand_mvut(self, m, v, u, t):
         """Return the expanded m, v, u, and t for broadcasting together.
         """
         # m.shape == (s,g)
@@ -402,6 +404,10 @@ class GaussianMixtureModel(object):
             # massage inputs to tanh range [-1,1]
             netIn = (2*(fullIn-eRInB)/(eRInT-eRInB)) - 1
             
+            ##TODO FIXME I'm going to need to calculate the weight and bias gradients...
+            #               but that's all it seems to be getting wrong. the layer activations seem correct.
+            #               from those, it should be easy to calculate stuff.
+            
             #run ANN
             lay1 = tf.tanh( (tf.matmul(netIn, w1)) + b1)
             #lay1 = tf.nn.bias_add(tf.matmul(netIn, w1), b1)
@@ -414,6 +420,7 @@ class GaussianMixtureModel(object):
             mixRaw = tf.slice(netOut, begin=[0,0], size=[-1,g]) #.shape == [s,g]
             varRaw = tf.slice(netOut, begin=[0,g], size=[-1,outDims]) #.shape == [s,t]
             meanRaw = tf.reshape(tf.slice(netOut, begin=[0,g+outDims], size=[-1,-1]), shape=[-1,g,outDims]) #.shape == [s,g,t]
+            #meanRaw = tf.reshape(tf.slice(netOut, begin=[0,g+outDims], size=[-1,g*outDims]), shape=[-1,g,outDims]) #.shape == [s,g,t]
         #-----</ANN Execution>-----
         
         
@@ -426,9 +433,16 @@ class GaussianMixtureModel(object):
             mix = tf.nn.softmax(mixRaw)
             
         with tf.name_scope('massage_var') as scope:
+            
+            #FIXME jhd838891hdjdlsl set var to 1 to see if it's causing the problem.
+            #this doesn't make tf calculate a zero gradient? HOW!? is this being used elsewhere?
+            #   apparently there's still a way to change var that matters?
+            #varRaw = varRaw*0 #var should be 1
+            
             #variances
             #varScale = tf.Variable(2.0) #TODO is this a good idea?
             var = tf.exp(tf.mul(varRaw, 1.0)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
+            
             
         with tf.name_scope('massage_mean') as scope:
             #mean
@@ -460,9 +474,9 @@ class GaussianMixtureModel(object):
         rd['inRange']=inRange
         rd['outRange']=outRange
         
-        rd['mixRaw']=mixRaw
-        rd['varRaw']=varRaw
-        rd['meanRaw']=meanRaw
+        #rd['mixRaw']=mixRaw
+        #rd['varRaw']=varRaw
+        #rd['meanRaw']=meanRaw
         
         rd['netIn']=netIn
         rd['lay1']=lay1
@@ -514,17 +528,17 @@ class GaussianMixtureModel(object):
             #FIXME      do i have to mix the targets like the gaussian components?
             tot_likelihood = tf.reduce_sum(likelihood, [1,2]) #sum over g and t dimensions.
             
+            """38ndksl3ihk
+            Trying something. remove the summation over the samples, and let this be aggregated over the weights in the end."""
             #take natural log of sum, then reduce over samples, then negate for the final negative log likelihood
-            nll = -tf.reduce_sum(tf.log(tot_likelihood)) #this reduces along the final dimension, so nll will be a scalar.
+            #nll = -tf.reduce_sum(tf.log(tot_likelihood)) #this reduces along the final dimension, so nll will be a scalar. #disabled: 38ndksl3ihk
+            nll = -tf.log(tot_likelihood) #38ndksl3ihk
             
             #summary ops
-            v_norm_hist = tf.histogram_summary("Variance Normalizer", v_norm)
-            v_dem_hist = tf.histogram_summary("Variance Denominator", v_dem)
-            tm_num_hist = tf.histogram_summary("Target-Mean Numerator", tm_num)
-            premix_hist = tf.histogram_summary("Pre-mixed Likelihood", premix)
             likelihood_hist = tf.histogram_summary("Post-mixed Likelihood", likelihood)
             tot_likelihood_hist = tf.scalar_summary("Average Likelihood Across Samples", tf.reduce_mean(tot_likelihood))
-            nll_hist = tf.scalar_summary("Negative Log Likelihood", nll)
+            #nll_hist = tf.scalar_summary("Negative Log Likelihood", nll) #disabled : 38ndksl3ihk
+            nll_hist = tf.scalar_summary("Negative Log Likelihood", tf.reduce_sum(nll)) #38ndksl3ihk
             
         #-----<Update Reference Dict>-----
         self.refDict['loss_nll'] = nll
@@ -543,6 +557,7 @@ class GaussianMixtureModel(object):
         #-----<Argument Processing>-----
         inDims = self.inDims
         outDims = self.outDims
+        rd = self.refDict
         if learningRate is None:
             learningRate = self.learningRate
         #-----</Argument Processing>-----
@@ -555,13 +570,27 @@ class GaussianMixtureModel(object):
         
         with tf.name_scope('calc_own_gradients') as scope:
             #calculate the gradients of the activations attached to mvu, but outside of tensorflow.
-            self._calc_gradients()
+            self._calc_mvu_gradients()
+            #calculate the weight and bias gradients given tf calculated activation errors
+            self._calc_wb_gradients_from_tf_activations()
         
         with tf.name_scope('train_step') as scope:
             optimizer = tf.train.GradientDescentOptimizer(learningRate)
             #optimizer = tf.train.MomentumOptimizer(learningRate, 0.01)
-            gateGrad = optimizer.GATE_GRAPH
-            train_step = optimizer.minimize(self.refDict['loss_nll'], gate_gradients=gateGrad)
+            train_step = optimizer.minimize(rd['loss_nll'])
+            #custom train step applies the calculated and aggregated gradients.
+            #   to modify the construction of these gradients,
+            #   simply modify self._calc_wb_gradients_from_tf_activations
+            custom_train_step = optimizer.apply_gradients([
+                                                            (rd['calc_agg_grad_b1'], rd['b1']),
+                                                            (rd['calc_agg_grad_b2'], rd['b2']),
+                                                            (rd['calc_agg_grad_b3'], rd['b3']),
+                                                            
+                                                            (rd['calc_agg_grad_w1'], rd['w1']),
+                                                            (rd['calc_agg_grad_w2'], rd['w2']),
+                                                            (rd['calc_agg_grad_w3'], rd['w3'])
+                                                        ]
+                                                    )
         
         sess = tf.Session()
         
@@ -570,10 +599,10 @@ class GaussianMixtureModel(object):
         
         sess.run(tf.initialize_all_variables())
         
-        #----<Convert Gradients>----
+        #----<Convert TF calculated Gradients>----
         #all variables
         #this returns a list of tuples
-        gradients = optimizer.compute_gradients(self.refDict['loss_nll'], gate_gradients=gateGrad)
+        gradients = optimizer.compute_gradients(self.refDict['loss_nll'])
         gradients = dict(gradients) #store list of tuples as dict
         inv_grad = dict((v,k) for k,v in gradients.iteritems()) #invert dict so tensor is the key
         
@@ -585,17 +614,20 @@ class GaussianMixtureModel(object):
                                                             self.refDict['m'],
                                                             self.refDict['v'],
                                                             self.refDict['u']
-                                                        ], gate_gradients=gateGrad)
-        #----</Convert Gradients>----
+                                                        ])
+                                                        
+        
+        #----</Convert TF calculated Gradients>----
         
         #-----<Update Reference Dict>-----
-        rd = self.refDict
         rd['sess']=sess
         rd['summaries']=merged
         rd['summaryWriter']=writer
-        rd['train_step']=train_step
+        rd['tf_train_step']=train_step
+        rd['custom_train_step']=custom_train_step
         
         #use the network variables as keys for the gradients dictionary, store for later use.
+        #TODO FIXME rename these to tf_grad_** for clarity.
         rd['grad_w1']=inv_grad[rd['w1']]
         rd['grad_b1']=inv_grad[rd['b1']]
         rd['grad_w2']=inv_grad[rd['w2']]
@@ -607,6 +639,7 @@ class GaussianMixtureModel(object):
         rd['tf_grad_v']=grad_mvu[1]
         rd['tf_grad_u']=grad_mvu[2]
         #-----</Update Reference Dict>-----
+        
     def _get_refDict(self):
         """Return the reference dictionary holding tensorflow tensors.
         """
@@ -624,7 +657,7 @@ class GaussianMixtureModel(object):
         
         return iterations, testBatchSize, trainBatchSize
         
-    def _calc_gradients():
+    def _calc_mvu_gradients(self):
         """Adds calculated (outside of tf) gradients of the output activations to the reference dict.
         These are not aggregated over the samples.
         """
@@ -642,6 +675,56 @@ class GaussianMixtureModel(object):
         self.refDict['calc_grad_m_activations']=grad_m
         self.refDict['calc_grad_v_activations']=grad_v
         self.refDict['calc_grad_u_activations']=grad_u
+        
+    def _calc_wb_gradients_from_tf_activations(self):
+        """Adds non tf calculated weight and bias gradients from the tf calculated activation gradients.
+        Stores tf calculated layer gradients
+        Stores self calculated bias gradients
+        Stores self calculated weight gradients
+        Stores aggregated versions of the weight and bias gradients
+        """
+        rd = self.refDict
+        
+        #calculate layer errors over s.
+        grad_activations = tf.gradients(self.refDict['loss_nll'], [ 
+                                                                    self.refDict['lay1'],
+                                                                    self.refDict['lay2']
+                                                                    self.refDict['netOut']
+                                                                ])
+        #store in reference dict for more convenient naming.
+        rd['grad_lay1']=grad_activations[0]  # .shape == (s,hSize)
+        rd['grad_lay2']=grad_activations[1]
+        rd['grad_netOut']=grad_activations[2]  # .shape == (s, netOutSize)
+        
+        
+        #the bias gradients are the activation gradients. multiply by the learning rate first.
+        rd['calc_grad_b1'] = rd['grad_lay1'] * self.learningRate
+        rd['calc_grad_b2'] = rd['grad_lay2'] * self.learningRate
+        rd['calc_grad_b1'] = rd['grad_lay3'] * self.learningRate
+        
+        #the weight gradients are the previous layer's activations multiplied by the error gradient in the output.
+        #change so that ins.shape == (s,inSize,1) and outs.shape == (s,1,outSize)
+        netIn_ = tf.expand_dims(rd['netIn'], 2)  # .shape == (s, inSize, 1)
+        lay1_ = tf.expand_dims(rd['lay1'], 2)
+        lay2_ = tf.expand_dims(rd['lay2'], 2)
+        
+        grad_lay1_ = tf.expand_dims(rd['grad_lay1'], 1)  # .shape == (s, 1, outSize)
+        grad_lay2_ = tf.expand_dims(rd['grad_lay2'], 1)
+        grad_lay3_ = tf.expand_dims(rd['grad_lay3'], 1)
+        
+        rd['calc_grad_w1'] = netIn_ * grad_lay1_ * self.learningRate
+        rd['calc_grad_w2'] = lay1_ * grad_lay2_ * self.learningRate
+        rd['calc_grad_w3'] = lay2_ * grad_lay3_ * self.learningRate
+        
+        #aggregate over samples with the average!
+        agg_func = tf.reduce_mean
+        rd['calc_agg_grad_b1'] = agg_func(rd['calc_grad_b1'], 0)
+        rd['calc_agg_grad_b2'] = agg_func(rd['calc_grad_b2'], 0)
+        rd['calc_agg_grad_b3'] = agg_func(rd['calc_grad_b3'], 0)
+        
+        rd['calc_agg_grad_w1'] = agg_func(rd['calc_grad_w1'], 0)
+        rd['calc_agg_grad_w2'] = agg_func(rd['calc_grad_w2'], 0)
+        rd['calc_agg_grad_w3'] = agg_func(rd['calc_grad_w3'], 0)
         
     def _tdb_nodes(self):
         """Add a list of tdb nodes for evaluation by tdb.debug
@@ -748,6 +831,36 @@ class GaussianMixtureModel(object):
                                                 self.graph.as_graph_element(self.refDict['calc_grad_u_activations'])
                                             ])
         nodeList.append(p_grad_u)
+        
+        
+        #grad_m over x
+        p_tf_grad_m = tdb.plot_op(viz.tf_grad_m, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['tf_grad_m'])
+                                            ])
+        nodeList.append(p_tf_grad_m)
+        
+        #grad_v over x
+        p_tf_grad_v = tdb.plot_op(viz.tf_grad_v, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['tf_grad_v'])
+                                            ])
+        nodeList.append(p_tf_grad_v)
+        
+        #grad_u over x
+        p_tf_grad_u = tdb.plot_op(viz.tf_grad_u, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['tf_grad_u'])
+                                            ])
+        nodeList.append(p_tf_grad_u)
+        
+        
+        #grad_netOut over x
+        p_tf_grad_netOut = tdb.plot_op(viz.tf_grad_netOut, inputs=[
+                                                self.graph.as_graph_element(self.refDict['fetchX']),
+                                                self.graph.as_graph_element(self.refDict['grad_netOut'])
+                                            ])
+        nodeList.append(p_tf_grad_netOut)
         #----<Gradients Over X>-----
         
         #----</Plots>----
@@ -807,8 +920,14 @@ class GaussianMixtureModel(object):
                                 
                                 self.refDict['tf_grad_m'], #16
                                 self.refDict['tf_grad_v'], #17
-                                self.refDict['tf_grad_u'] #18
+                                self.refDict['tf_grad_u'], #18
                                 
+                                self.refDict['calc_agg_grad_w1'], #19
+                                self.refDict['calc_agg_grad_b1'], #20
+                                self.refDict['calc_agg_grad_w2'], #21
+                                self.refDict['calc_agg_grad_b2'], #22
+                                self.refDict['calc_agg_grad_w3'], #23
+                                self.refDict['calc_agg_grad_b3'] #24
                             ]
                             
                     evals.extend(self.refDict['tdb_nodes']) #extend with the list of tensorflow debugger nodes
@@ -828,8 +947,8 @@ class GaussianMixtureModel(object):
                     #update feed_dict with training batch
                     feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x, self.t, trainBatchSize)
                     self.refDict['sess'].run([
-                                            self.refDict['train_step']
-                                        ], feed_dict=feed_dict) #run train_step with training batch
+                                            self.refDict['tf_train_step']
+                                        ], feed_dict=feed_dict) #run tf_train_step with training batch
             #----<Training Loop>----
             
             #for notebook testing.
@@ -857,7 +976,14 @@ class GaussianMixtureModel(object):
                         
                         tf_grad_m=result[16],
                         tf_grad_v=result[17],
-                        tf_grad_u=result[18]
+                        tf_grad_u=result[18],
+                        
+                        calc_agg_grad_w1=result[19],
+                        calc_agg_grad_b1=result[20],
+                        calc_agg_grad_w2=result[21],
+                        calc_agg_grad_b2=result[22],
+                        calc_agg_grad_w3=result[23],
+                        calc_agg_grad_b3=result[24]
                         )
             
     def get_xmvu(self):
