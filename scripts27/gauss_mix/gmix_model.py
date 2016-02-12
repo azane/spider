@@ -308,7 +308,8 @@ class GaussianMixtureModel(object):
         This initializes bias matrices for the ANN in this model.
         """
         #initialize non-zero bias matrix
-        initial = tf.constant(0.1, shape=shape)
+        #initial = tf.constant(0.1, shape=shape)
+        initial = tf.truncated_normal(shape, stddev=0.3)
         #tf.clip_by_value(initial, -1., 1.)
         return tf.Variable(initial)
 
