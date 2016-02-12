@@ -344,11 +344,11 @@ class GaussianMixtureModel(object):
         return x[i], t[i]
     def _gmix_forward_model(self):
         """Build forward model and add tensors to the dict of tensorflow tensors
-    
+            
             This method builds the forward part of the tensorflow graph and returns a dict for reference.
                 This does not build a loss function. It only builds the placeholders, ANN,
                     and shapes the ANN outputs into something useable by a loss function or a sampler.
-        
+                    
             'inDims' is the size of the x vector, i.e. the number of input dimensions (not array dimensions!)
             'outDims' is the size of the t/y vector, i.e. the number of ultimate target dimensions, this differs from the output of the ANN
             'g' is the number of gaussian components to employ
@@ -662,11 +662,33 @@ class GaussianMixtureModel(object):
         rd['tf_grad_u']=grad_mvu[2]
         #-----</Update Reference Dict>-----
         
-    def _get_refDict(self):
+    def get_refDict(self):
         """Return the reference dictionary holding tensorflow tensors.
         """
-        #TODO incorporate some method whereby arbitrarily selected elements of the reference dict are compute and returned as ndarrays.
         return self.refDict
+    def get_evals(self, evalStrs):
+        """Return a dictionary of evaluated tensors with evalStr as keys.
+        'evalStr' contains a list of strings that act as the reference dictionary keys for the tensors to evaluate."""
+        
+        with self.graph.as_default():
+            #use test values as feeds.
+            #TODO add a 'size' argument that defines the size of the test inputs
+            #TODO allow the user to use their own feed dict? or at least certain parts
+            feed_dict = {
+                            self.refDict['x']:self.x_test,
+                            self.refDict['t']:self.t_test,
+                            self.refDict['inRange']:self.inRange,
+                            self.refDict['outRange']:self.outRange
+                        }
+            
+            #convert list of strings to values from refDict.
+            evals = [self.refDict[k] for k in evalStrs]
+            
+            result = self.refDict['sess'].run(evals, feed_dict=feed_dict)
+            
+            #return a dict of the evalStrs and the evaluated tensors.
+            return dict(zip(evalStrs, result))
+        
     def _massage_training_arguments(self, iterations, testBatchSize, trainBatchSize):
         iterations = range(iterations)
         
@@ -807,6 +829,42 @@ class GaussianMixtureModel(object):
                                             ])
         nodeList.append(p_hist_w2)
         #---</W2>---
+        
+        #---<B2>---
+        #biases of layer 1 over iterations
+        p_watch_b2 = tdb.plot_op(viz.watch_biases, inputs=[
+                                                self.graph.as_graph_element(self.refDict['b2'])
+                                            ])
+        nodeList.append(p_watch_b2)
+        #---</B2>---
+        
+        #---<W3>---
+        #w3 over iterations
+        p_watch_w3 = tdb.plot_op(viz.watch_weights, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w3'])
+                                            ])
+        nodeList.append(p_watch_w3)
+        
+        #w3 as squares
+        p_square_w3 = tdb.plot_op(viz.weight_squares, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w3'])
+                                            ])
+        #nodeList.append(p_square_w3)
+        
+        #w3 as hist
+        p_hist_w3 = tdb.plot_op(viz.weight_hist, inputs=[
+                                                self.graph.as_graph_element(self.refDict['w3'])
+                                            ])
+        nodeList.append(p_hist_w3)
+        #---</W3>---
+        
+        #---<B3>---
+        #biases of layer 3 over iterations
+        p_watch_b3 = tdb.plot_op(viz.watch_biases, inputs=[
+                                                self.graph.as_graph_element(self.refDict['b3'])
+                                            ])
+        nodeList.append(p_watch_b3)
+        #---</B3>---
         
         self.refDict['tdb_nodes'] = nodeList
         
@@ -992,7 +1050,7 @@ class GaussianMixtureModel(object):
             #----<Training Loop>----
             for i in iterations:
             
-                if (i+1) % reportEvery == 0: #run reports every 10 iterations.
+                if ((i+1) % reportEvery == 0): #run reports every reportEvery iterations.
                     
                     #update feed_dict with test batch
                     feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x_test, self.t_test, testBatchSize)
@@ -1000,39 +1058,6 @@ class GaussianMixtureModel(object):
                     evals = [
                                 #self.refDict['summaries']#,
                                 #self.refDict['loss_nll']
-                                
-                                #network stuff
-                                self.refDict['w1'], #0
-                                self.refDict['b1'], #1
-                                self.refDict['w2'], #2
-                                self.refDict['b2'], #3
-                                self.refDict['w3'], #4
-                                self.refDict['b3'], #5
-                                self.refDict['lay1'], #6
-                                self.refDict['lay2'], #7
-                                self.refDict['netOut'], #8
-                                self.refDict['netIn'], #9
-                                
-                                #gradient stuff
-                                self.refDict['grad_w1'], #10
-                                self.refDict['grad_b1'], #11
-                                self.refDict['grad_w2'], #12
-                                self.refDict['grad_b2'], #13
-                                self.refDict['grad_w3'], #14
-                                self.refDict['grad_b3'], #15
-                                
-                                self.refDict['tf_grad_m'], #16
-                                self.refDict['tf_grad_v'], #17
-                                self.refDict['tf_grad_u'], #18
-                                
-                                self.refDict['calc_agg_grad_w1'], #19
-                                self.refDict['calc_agg_grad_b1'], #20
-                                self.refDict['calc_agg_grad_w2'], #21
-                                self.refDict['calc_agg_grad_b2'], #22
-                                self.refDict['calc_agg_grad_w3'], #23
-                                self.refDict['calc_agg_grad_b3'], #24
-                                
-                                self.refDict['tot_likelihood'] #25
                             ]
                             
                     evals.extend(self.refDict['tdb_nodes']) #extend with the list of tensorflow debugger nodes
@@ -1055,59 +1080,12 @@ class GaussianMixtureModel(object):
                     self.refDict['sess'].run(self.refDict['custom_train_step'], feed_dict=feed_dict)
             #----<Training Loop>----
             
-            #for notebook testing.
-            return dict(
-                        
-                        #net stuff
-                        w1=result[0],
-                        b1=result[1],
-                        w2=result[2],
-                        b2=result[3],
-                        w3=result[4],
-                        b3=result[5],
-                        lay1=result[6],
-                        lay2=result[7],
-                        netOut=result[8],
-                        netIn=result[9],
-                        
-                        #gradient stuff
-                        grad_w1=result[10],
-                        grad_b1=result[11],
-                        grad_w2=result[12],
-                        grad_b2=result[13],
-                        grad_w3=result[14],
-                        grad_b3=result[15],
-                        
-                        tf_grad_m=result[16],
-                        tf_grad_v=result[17],
-                        tf_grad_u=result[18],
-                        
-                        calc_agg_grad_w1=result[19],
-                        calc_agg_grad_b1=result[20],
-                        calc_agg_grad_w2=result[21],
-                        calc_agg_grad_b2=result[22],
-                        calc_agg_grad_w3=result[23],
-                        calc_agg_grad_b3=result[24],
-                        
-                        tot_likelihood=result[25]
-                        )
-            
     def get_xmvu(self):
-        with self.graph.as_default():
-            feed_dict = {
-                            self.refDict['x']:self.x_test,
-                            self.refDict['t']:self.t_test,
-                            self.refDict['inRange']:self.inRange,
-                            self.refDict['outRange']:self.outRange
-                        }
-                        
-            #evaluate the trained model at m, v, and u with the test data.
-            result = self.refDict['sess'].run([
-                                            self.refDict['m'],
-                                            self.refDict['v'],
-                                            self.refDict['u']
-                                        ],feed_dict=feed_dict)
-            return result[0], result[1], result[2] #m, v, u
+        #TODO rename to get_mvu, not xmvu.
+        keys = ['m', 'v', 'u']
+        mvu = self.get_evals(keys)
+        return mvu['m'], mvu['v'], mvu['u']
+    
     def get_write_xmvu(self, path):
         m, v, u = self.get_xmvu()
         
