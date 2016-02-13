@@ -1,6 +1,6 @@
 import pymunk
 from pymunk import Vec2d
-import numpy
+import numpy as np
 import math
 
 """This file returns a dictionary of classes that return pymunk configurations.
@@ -30,32 +30,47 @@ Question: Should these nodes be built to return as much information as possible.
 
                 
 class BaseNode(object):
-    def __init__(self, body, anchorPoint, shapeGroup, environment=True, sensor=False):
+    """The base class for all nodes, including muscles.
+    When initializing:
+        'body' is the body to which the node will be attached.
+        'anchorPoint' is the point, relative to the body, of attachment to that body.
+        'shapeGroup' is ??
+        'numData' is a dictionary defining the 1d array sizes of each of the three data types.
+    """
+    
+    def __init__(self, body, anchorPoint, shapeGroup):
         object.__init__(self)
         
-        """environment and sensor bools determine whether or not the node will be recorded, in data, as an environment variable and/or a sensor.
-            where 'or' is naturally non-exclusive"""
-        
-        self.anchorBody = body #the body to which the node is connected
+        self.anchorBody = body
         self.anchorPoint = anchorPoint
         self.shapeGroup = shapeGroup
         
         #this updates the initial coordinate of the node center. worldX and worldY are not kept updated unless this is called.
         self._update_worldXY()
         
-        self.environment = environment
-        self.sensor = sensor
+        self._spi_data = {
+                            'environmental': None,
+                            'control': None,
+                            'sensory': None
+                        }
         
     def _update_worldXY(self):
         self.worldX, self.worldY = self.anchorBody.local_to_world(self.anchorPoint)
         
-    def node_elements(self):
-        raise NotImplementedError("'node_elements' must be implemented in child classes. It should return all pymunk bodies, shapes, constraints, etc. of the node.")
-    def get_info(self):
-        raise NotImplementedError("'get_info' must be implemented in child classes. It should return a list of the sensor's information.")
+    def spi_node_elements(self):
+        raise NotImplementedError("'spi_node_elements' must be implemented in child classes.\
+                                        It should return a list of all pymunk bodies, shapes, constraints, etc. of the node.")
     def spi_get_info(self):
-        raise NotImplementedError("'spi_get_info' must be implemented in child classes. It should return a list of the sensor's information.")
-    def step(self, dt):
+        return self._spi_data
+        
+    def spi_set_control_features(self, control_array):
+        assert type(control_array) is np.ndarray
+        assert control_array.shape == self._spi_data['control'].shape
+        #dtype assertions?
+        
+        self._spi_data['control'] = control_array
+        
+    def spi_step(self, dt):
         pass #unimplemented, this does nothing, but it's not considered an error.
 
 #TODO part of a flexible, mutateable node model might be to have sigmoidal or gaussian settings for randomly generated defaults.
@@ -67,29 +82,29 @@ class DeltaX(BaseNode):
     def __init__(self, body, anchorPoint, shapeGroup, mavgPeriod=25, mavgPoints=100, **kwargs):
         BaseNode.__init__(self, body, anchorPoint, shapeGroup, **kwargs)
         
-        self.points = numpy.zeros(mavgPoints)
+        self.points = np.zeros(mavgPoints)
         
         self.dtAgg = 0
         
         self.takePointAt = mavgPeriod/mavgPoints #take mavgPoints over mavgPeriod, mavgPoints in mavgPeriod.
         
-        self.avgWeights = None #TODO generate a numpy array across an inverted log() for weight
+        self.avgWeights = None #TODO generate a np array across an inverted log() for weight
         
         self.lastX = self.worldX #init the lastX value to the initial worldX value.
         
     
-    def node_elements(self):
+    def spi_node_elements(self):
         return [] #nothing to see here.
         
     def spi_get_info(self):
         
-        f = numpy.average(self.points, weights=self.avgWeights)
+        f = np.average(self.points, weights=self.avgWeights)
         
         #print "deltaX avg: " + str(f)
         
         return [f]
         
-    def step(self, dt):
+    def spi_step(self, dt):
         
         self.dtAgg = self.dtAgg + dt #increment counter.
         
@@ -97,7 +112,7 @@ class DeltaX(BaseNode):
         if self.dtAgg < self.takePointAt:
             return
         
-        numpy.roll(self.points, 1) #roll array for new entry
+        np.roll(self.points, 1) #roll array for new entry
         
         self._update_worldXY() #update global coordinates (worldX)
         
@@ -106,19 +121,28 @@ class DeltaX(BaseNode):
         self.lastX = self.worldX #update lastX to this worldX for next time.
         
     
-#the DampedSpring spi class that provides a get_info bit.
-class SpiMuscle(pymunk.DampedSpring):
-    #TODO implement a control feature method. but...this might need to happen in the base node?
+class SpiMuscle(pymunk.DampedSpring, BaseNode):
     
-    """this 'node' inherits from the pymunk DampedSpring, but has information retrieval and control features
-        paralelling normal nodes so that muscles and nodes can be grouped together in the spider brain."""
+    """this 'node' inherits from the pymunk DampedSpring and BaseNode.
+    Muscles are grouped with other nodes for drawing, updating, and data collection."""
     def __init__(self, *args, **kwargs):
-        #TODO this class needs dt as well to calculate the slope.
-        pymunk.DampedSpring.__init__(self, *args, **kwargs)
         
+        #NOTE: pymunk.DampedSpring does not use super(), so we need to do it this way.
+        if args:
+            raise AttributeError("SpiMuscle only accepts key word arguments. Normal arguments an be defined as key words.")
+        pymunk.DampedSpring.__init__(self, **kwargs)
+        
+        #<---BaseNode.__init__ Replacement>
+        #don't call BaseNode.__init__, as the body and anchors are tracked by DampedSpring
+        #   but we do need a few things.
         #set for muscles.
-        self.environment = True
-        self.sensor = False
+        #self.environment = True
+        #self.sensor = False
+        self.environment = environment
+        self.sensor = sensor
+        #<---BaseNode.__init__ Replacement>
+        
+        self.spi_originalLength = spi_originalLength
         
         self.last = self._spi_get_length() #for delta
         
@@ -128,14 +152,18 @@ class SpiMuscle(pymunk.DampedSpring):
         aWorld = self.a.local_to_world(self.anchr1)
         bWorld = self.b.local_to_world(self.anchr2)
         
-        return numpy.sqrt(aWorld.get_dist_sqrd(bWorld))
+        return np.sqrt(aWorld.get_dist_sqrd(bWorld))
         
     def spi_get_info(self):
         
         return [self._spi_get_length()]
         #return [self._spi_get_length(), self.deltaOverDT] #to be consistent with a "max information" philosophy.
+    
+    def spi_node_elements(self):
+        #return a list of node elements. the muscle uses itself, as it inherits from DampedSpring.
+        return [self]
         
-    def step(self, dt):
+    def spi_step(self, dt):
         current = self._spi_get_length()
         
         self.deltaOverDT = (current - self.last)/dt
@@ -170,7 +198,7 @@ class BalanceNode(BaseNode):
         self.deltaOverDT = 0 #start slope at 0
         
         
-    def node_elements(self):
+    def spi_node_elements(self):
         #FIXME build the elements in here, not in __init__
         return self.elements
     
@@ -181,10 +209,10 @@ class BalanceNode(BaseNode):
     def _get_balance(self):
         a = (self.segBody.angle - (self.anchorBody.angle - self.origAnchorAngle))
         
-        fa = numpy.arcsin(numpy.sin(a)) #i don't really know how it works, but this is a succinct way to get the range between -pi and pi. yay trig.
+        fa = np.arcsin(np.sin(a)) #i don't really know how it works, but this is a succinct way to get the range between -pi and pi. yay trig.
         #print fa
         return fa
-    def step(self, dt):
+    def spi_step(self, dt):
         current = self._get_balance()
         
         self.deltaOverDT = (current - self.last)/dt

@@ -12,6 +12,9 @@ from pyglet.window import key, mouse
 import pymunk
 import spi_pyglet_util
 
+#TODO it may be better to have a worlds folder? would it be possible to import the folder,
+#       and then execute a world file based on an argument passed from the command line?
+#   #THIS we could have 'worlds' return a dictionary of classes, and then use a string passed from command line to use one of those worlds.
 from worlds import *
 #FIXME rename "space" in this class to world, cz that's what we call it elsewhere.
 

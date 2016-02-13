@@ -71,6 +71,7 @@ class SpiderPhysiology(object):
         #the below are for data exchange reference.
         #self.nodes contains full node objects
         #self.muscles contains full muscle objects
+        #TODO merge these two lists.
         self.nodes = [] #these do special things, defined in spider_nodes.py
         self.muscles = []
         
@@ -81,9 +82,8 @@ class SpiderPhysiology(object):
         if testBool:
             self.dp_bones, self.dp_muscles, self.dp_nodes = self.genAnatomy(testBones, testMuscles, testNodes)
         else:
-            if not bonesArray or not musclesArray:
-                print "I need these without testBool!" #FIXME make an actual error
-                return False
+            if not bonesArray or not musclesArray or not nodesArray:
+                raise ValueError("testBool is False, so bonesArray, musclesArray and nodesArray must be defined.")
             self.dp_bones, self.dp_muscles, self.dp_nodes = self.genAnatomy(bonesArray, musclesArray, nodesArray)
         
     def draw_these(self):
@@ -217,16 +217,21 @@ class SpiderPhysiology(object):
             print "s_point: " + str(s_point)
             
             
-            muscle = SpiMuscle(segs[fBI]['body'], segs[sBI]['body'], (fBRatio*segs[fBI]['l'], 0), (sBRatio*segs[sBI]['l'], 0), restingLength, stiffness, damping)
+            muscle = SpiMuscle(a=segs[fBI]['body'], b=segs[sBI]['body'],
+                                anchr1=(fBRatio*segs[fBI]['l'], 0), anchr2=(sBRatio*segs[sBI]['l'], 0),
+                                restLength=restingLength, stiffness=stiffness, damping=damping,
+                                environment=m[2], spi_originalLength=restingLength)
             #muscle = pymunk.PinJoint(segs[fBI]['body'], segs[sBI]['body'], f_point, s_point)
             #give muscle another property, spi_prefixed.
-            muscle.spi_originalLength = restingLength
+            muscle.spi_originalLength = restingLength #FIXME huh? just add this to the class?
             
             muscle.environment = m[2] #set whether or not this muscle will be considered in data collection.
             
             self.muscles.append(muscle) #append to muscles control list and potential data collection list.
             
-            muscles.append(muscle) #append for drawing.
+            mels = muscle.spi_node_elements()
+            assert type(mels)==list, "Node.spi_node_elements must return a list."
+            muscles.extend(mels) #extend elements for drawing.
         
         nodes = []
         for i, n in enumerate(nodesArray):
@@ -241,9 +246,11 @@ class SpiderPhysiology(object):
             nodeClass = lib_nodes[n[1]]
             
             #pass the 3rd element of n, n[2] and expand it to kwargs. it is a dictionary containing node specific arguments
-            nodeObject = nodeClass(connBody, connAnchor, shapeGroup, **n[2]) #FIXME does expanding a dictionary like this work as expected?
+            nodeObject = nodeClass(connBody, connAnchor, shapeGroup, **n[2])
             
-            nodes.extend(nodeObject.node_elements()) #FIXME throw error if node_elements fails to return a list. "your node class is brokey, check the docs"
+            nels = nodeObject.spi_node_elements()
+            assert type(nels)==list, "Node.spi_node_elements must return a list."
+            nodes.extend(nels)
             
             self.nodes.append(nodeObject)
         

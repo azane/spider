@@ -11,14 +11,6 @@ remember that one of the main premises is that the series data is not stored per
 
 """
 
-"""NOTE:
-
-real quick cz i don't know where else to put it. we'll want to give the brain the ability to determine how affective control changing will be.
-for example, if it's calculated that the right muscle is supporting a lot of weight, it will be compressed, and modifying the resting length of the left
-    muscle will prove more affective. (and yes, i mean affective, not effective)
-
-"""
-
 class SpiderBrain(object):
     def __init__(self, physiology):
         object.__init__(self)
@@ -101,7 +93,7 @@ class SpiderBrain(object):
     def _step_nodes(self, dt):
         #FIXME FIXME we might want to limit this iteration to only once every few dt, rather than every single one. it could limit FPS significantly.
         for n in self.allNodes:
-            n.step(dt)
+            n.spi_step(dt)
     def _step_data(self, dt):
         
         
