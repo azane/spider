@@ -88,14 +88,6 @@ class SpiderBrain(object):
         #print self.data
         #print
     def step(self, dt):
-        self._step_nodes(dt)
-        self._step_data(dt)
-    def _step_nodes(self, dt):
-        #FIXME FIXME we might want to limit this iteration to only once every few dt, rather than every single one. it could limit FPS significantly.
-        for n in self.allNodes:
-            n.spi_step(dt)
-    def _step_data(self, dt):
-        
         
         #check timestep.
         self.dtAgg = self.dtAgg + dt
@@ -112,6 +104,7 @@ class SpiderBrain(object):
         #gather info from physiology and update the current time step.
         ctsIndex = -1 #counter for how far through the cts array we are. start at -1 cz index.
         for i, p in enumerate(self.allNodes):
+            p.spi_step(dt)
             if p.environment or p.sensor:
                 temp = numpy.asarray(p.spi_get_info(), dtype=numpy.float64)
                 #for the relevant row, fill only as many columns as are returned, leaving the rest nan.

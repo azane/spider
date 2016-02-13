@@ -28,15 +28,22 @@ Question: Should these nodes be built to return as much information as possible.
 
 """
 
-                
+#TODO part of a flexible, mutateable node model might be to have sigmoidal or gaussian settings for randomly generated defaults.
+#           then, if the physiology mutates to take advantage of that particular node initialization argument, good!
+#               but, if not, the values are still generated over the correct range.
+
+
 class BaseNode(object):
     """The base class for all nodes, including muscles.
     When initializing:
         'body' is the body to which the node will be attached.
         'anchorPoint' is the point, relative to the body, of attachment to that body.
         'shapeGroup' is ??
-        'numData' is a dictionary defining the 1d array sizes of each of the three data types.
     """
+    
+    #FIXME this class uses the spi_ prefix to prevent namespace conflicts with doubly inherited pymunk classes.
+    #       but, i think it's probably better to not have nodes inherit from pymunk classes, and instead just have those objects as node elements.
+    #      this fix will require a rewrite of the SpiMuscle node.
     
     def __init__(self, body, anchorPoint, shapeGroup):
         object.__init__(self)
@@ -45,39 +52,79 @@ class BaseNode(object):
         self.anchorPoint = anchorPoint
         self.shapeGroup = shapeGroup
         
-        #this updates the initial coordinate of the node center. worldX and worldY are not kept updated unless this is called.
-        self._update_worldXY()
+        #this updates the initial coordinate of the node center. this is not called any other time, by default.
+        self.worldX, self.worldY = self._spi_update_worldXY()
         
+        #build node
+        self._spi_node_elements, self._spi_controlSize = self._spi_build_node()
+        assert type(self._spi_node_elements) is list, "_spi_build_node must return a list as the first return value."
+        assert type(self._spi_controlSize) is int, "_spi_build_node must return an int as the second return value."
+        
+        #initialize control feature array size.
         self._spi_data = {
                             'environmental': None,
-                            'control': None,
+                            'control': np.zeros(self._spi_controlSize),
                             'sensory': None
                         }
         
-    def _update_worldXY(self):
-        self.worldX, self.worldY = self.anchorBody.local_to_world(self.anchorPoint)
-        
-    def spi_node_elements(self):
-        raise NotImplementedError("'spi_node_elements' must be implemented in child classes.\
-                                        It should return a list of all pymunk bodies, shapes, constraints, etc. of the node.")
+    def _spi_update_worldXY(self):
+        """Return worldX and worldY.
+        Do not overwrite this method.
+        """
+        return self.anchorBody.local_to_world(self.anchorPoint)
+    
     def spi_get_info(self):
+        """Return the data dictionary after updating it.
+        Do not overwrite this method.
+        """
         return self._spi_data
-        
+    
     def spi_set_control_features(self, control_array):
+        """Set the passed control_array to data storage.
+        Do not overwrite this method.
+        """
         assert type(control_array) is np.ndarray
         assert control_array.shape == self._spi_data['control'].shape
         #dtype assertions?
         
         self._spi_data['control'] = control_array
         
+    
+    def spi_step_and_get_info(self, dt):
+        """Steps node to update data, and returns it in one call.
+        Convenience method.
+        Do not overwrite this method.
+        """
+        self.spi_step(dt)
+        return self.spi_get_info()
+    
+    def spi_node_elements(self):
+        """Return a list of pymunk stuff to be drawn and physics...ized
+        """
+        return self._spi_node_elements
+        
+    #---<Overwrite These!>---
+    def _spi_build_node(self):
+        """This method should be overwritten to
+             1. return a list of individual node elements
+             2. return the size of the control feature array
+        Overwrite this method.
+        """
+        raise NotImplementedError("'_spi_build_node' must be implemented in child classes."+\
+                                    " It must build and return a list of pymunk elements for drawing and physics,"+\
+                                        " and an int defining the size control feature array.")
+    
     def spi_step(self, dt):
-        pass #unimplemented, this does nothing, but it's not considered an error.
+        """This method should be overwritten to
+            1. update _spi_data, if needed
+            2. update node with incoming control features
+        Overwrite this method.
+        """
+        raise NotImplementedError("spi_step must be implemented in child classes. It should incorporate set control features and update _spi_data.")
+    #---</Overwrite These!>---
 
-#TODO part of a flexible, mutateable node model might be to have sigmoidal or gaussian settings for randomly generated defaults.
-#           then, if the physiology mutates to take advantage of that particular node initialization argument, good!
-#               but, if not, the values are still generated over the correct range.
 class DeltaX(BaseNode):
-    """The goal of this node is merely to track a moving average of DeltaX over a period defined by the physiology.
+    """The goal of this node is merely to track a moving average of DeltaX over a period.
     """
     def __init__(self, body, anchorPoint, shapeGroup, mavgPeriod=25, mavgPoints=100, **kwargs):
         BaseNode.__init__(self, body, anchorPoint, shapeGroup, **kwargs)
@@ -94,7 +141,7 @@ class DeltaX(BaseNode):
         
     
     def spi_node_elements(self):
-        return [] #nothing to see here.
+        return []  # nothing to see here.
         
     def spi_get_info(self):
         
