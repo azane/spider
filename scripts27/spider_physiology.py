@@ -225,8 +225,8 @@ class SpiderPhysiology(object):
             
             self.nodes.append(muscle) #append to node object list.
             
-            mels = muscle.spi_node_elements()
-            assert type(mels)==list, "Node.spi_node_elements must return a list."
+            mels = muscle.get_node_elements()
+            assert type(mels)==list, "Node.get_node_elements must return a list."
             dp_nodes.extend(mels) #extend elements for drawing.
         
         for i, n in enumerate(nodesArray):
@@ -246,8 +246,8 @@ class SpiderPhysiology(object):
             connAnchors = [connAnchor] #TEMP
             nodeObject = nodeClass(connBodies, connAnchors, shapeGroup, **n[2])
             
-            nels = nodeObject.spi_node_elements()
-            assert type(nels)==list, "Node.spi_node_elements must return a list."
+            nels = nodeObject.get_node_elements()
+            assert type(nels)==list, "Node.get_node_elements must return a list."
             dp_nodes.extend(nels)
             
             self.nodes.append(nodeObject)

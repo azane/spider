@@ -119,5 +119,5 @@ class ConveyorTest(pymunk.Space):
             
         if self.spi_keys[key.SPACE]:
             #self.spi_brain.series_to_csv(dest="data/foo.csv",columns=[0,1])
-            self.spi_brain.data_to_csv(dest="data/full_with_n.csv")
+            self.spi_brain.data_to_npz(dest="data/spi_data.npz")
             

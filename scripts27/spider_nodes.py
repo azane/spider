@@ -4,6 +4,7 @@ import numpy as np
 
 """This file returns a dictionary of classes that return pymunk configurations.
         Each class inherits from the main node class that requires a list of bodies and anchor points to attach to.
+    Nodes are only responsible for holding and dealing with control, environmental, and sensory feature data for the current timestep.
 """
 
 #Question: Should these nodes be built to return as much information as possible...or something like that, and that the brain
@@ -25,6 +26,8 @@ class BaseNode(object):
                         and all shapes of the built node should use self.shapeGroup
         'numAnchors' is the number of anchors. if this is passed, then the length of the anchor lists are verified.
         'report' is a bool that determines if the node should report any data. some nodes might only be used for constraint, for example.
+    Variable Naming
+        '_cts_data' is the current time step data, c.t.s. data.
     """
     
     #FIXME this class used the spi_ prefix to prevent namespace conflicts with doubly inherited pymunk classes.
@@ -43,93 +46,121 @@ class BaseNode(object):
         self.anchorBodies = anchorBodies
         self.anchorPoints = anchorPoints
         self.shapeGroup = shapeGroup
-        self.report = report
+        #mangle to prevent changing after initialization.
+        self.__report = report
         
         #this updates the initial coordinates of the node's anchor points in self.worldXYs. unless added in child classes, this is the only call to this method.
         #       i.e. by default, self.worldXYs only holds the values when the node was initialized.
-        self._spi_update_worldXYs()
+        self._update_worldXYs()
         
         #build node
-        self._spi_node_elements, self._spi_controlSize = self._build_node()
-        assert type(self._spi_node_elements) is list, "_build_node must return a list as the first return value."
-        assert type(self._spi_controlSize) is int, "_build_node must return an int as the second return value."
+        #   mangle the cts_data sizes to prevent post-initialization alterations.
+        self._node_elements, self.__controlSize, self.__environmentalSize, self.__sensorySize = self._build_node()
+        assert type(self._node_elements) is list, "_build_node must return a list as the first return value."
+        assert type(self._controlSize) is int, "_build_node must return an int as the second return value."
         
         #initialize control feature array size.
         #   control size must be defined during construction.
         #       this size is verified on every set and retrieve to guarantee that it does not change after construction.
         #   environmental and sensory should be set in step, but because the spider only reads these, the spider can just infer the size on retrieval.
-        self._spi_data = {
-                            'environmental': np.zeros(0),
-                            'control': np.zeros(self._spi_controlSize),
-                            'sensory': np.zeros(0)
+        self._cts_data = {
+                            'control': np.zeros(self.__controlSize),
+                            'environmental': np.zeros(self.__environmentalSize),
+                            'sensory': np.zeros(self.__sensorySize)
                         }
         
-    def _spi_update_worldXYs(self):
+    def _update_worldXYs(self):
         """Return worldX and worldY of the anchorBodies and anchor points..
         Do not overwrite this method.
         """
         
         self.worldXYs = [ab.local_to_world(self.anchorPoints[i]) for i, ab in enumerate(self.anchorBodies)]
     
-    def spi_get_info(self):
+    def get_data(self):
         """Return the data dictionary.
         Do not overwrite this method.
         """
-        assert self._spi_data['control'].shape == (self._spi_controlSize,), "The control array does not match the size defined during construction."
         
-        if self.report:
-            return self._spi_data
+        #FIXME there must be a better way to check these than checking every time the data is accessed?
+        
+        #verify stuff on the outgoing end to catch mistakes made in child classes.
+        assert self._cts_data['control'].shape == (self.__controlSize,), "The control array does not match the size defined during construction."
+        assert self._cts_data['environmental'].shape == (self.__environmentalSize,), "The control array does not match the size defined during construction."
+        assert self._cts_data['sensory'].shape == (self.__sensorySize,), "The control array does not match the size defined during construction."
+        
+        assert type(self._cts_data['control']) is np.ndarray, "The control array must be a numpy ndarray."
+        assert type(self._cts_data['environmental']) is np.ndarray, "The environmental array must be a numpy ndarray."
+        assert type(self._cts_data['sensory']) is np.ndarray, "The sensory array must be a numpy ndarray."
+        
+        #FIXME would it better to do this? or just force a flatten?
+        assert cts_data['control'].ndim == 1, "The control array must be 1 dimensional."
+        assert cts_data['environmental'].ndim == 1, "The environmental array must be 1 dimensional."
+        assert cts_data['sensory'].ndim == 1, "The sensory array must be 1 dimensional."
+        
+        #this enables faster processing by the brain.
+        assert cts_data['control'].dtype is np.dtype('float64'), "The control array dtype must be float64"
+        assert cts_data['environmental'].dtype is np.dtype('float64'), "The environmental array dtype must be float64"
+        assert cts_data['sensory'].dtype is np.dtype('float64'), "The sensory array dtype must be float64"
+        
+        if self.__report:
+            return self._cts_data
         else:
             #return an empty data dictionary if report is false.
             return {
-                        'environmental': np.zeros(0),
                         'control': np.zeros(0),
+                        'environmental': np.zeros(0),
                         'sensory': np.zeros(0)
                     }
                     
-    def spi_set_control_features(self, control_array):
-        """Set the passed control_array to data storage.
+    def set_control_features(self, control_array):
+        """Set the passed control_array to the data dictionary.
         Do not overwrite this method.
         """
+        #verify incoming
         assert type(control_array) is np.ndarray
-        assert control_array.shape == (self._spi_controlSize,), "The control array does not match the size defined during construction."
+        assert control_array.shape == (self.__controlSize,), "The control array does not match the size defined during construction."
         #dtype assertions?
         
-        self._spi_data['control'] = control_array
+        self._cts_data['control'] = control_array
         
     
-    def spi_step_and_get_info(self, dt):
+    def step_and_get_data(self, dt):
         """Steps node to update data, and returns it in one call.
         Convenience method.
         Do not overwrite this method.
         """
         self.step(dt)
-        return self.spi_get_info()
+        return self.get_data()
     
-    def spi_node_elements(self):
+    def get_node_elements(self):
         """Return a list of pymunk stuff to be drawn and physics...ized
         """
-        return self._spi_node_elements
+        return self._node_elements
         
     #---<Overwrite These!>---
     def _build_node(self):
-        """This method should be overwritten to
+        """This method should be overwritten to, in this order,
              1. return a list of individual node elements
              2. return the size of the control feature array
+             3. return the size of the environmental feature array
+             4. return the size of the sensory feature array
+        This requirement is to force new nodes to be very explicit about the sizes of their data arrays.
         Overwrite this method.
         """
         raise NotImplementedError("'_build_node' must be implemented in child classes."+\
                                     " It must build and return a list of pymunk elements for drawing and physics,"+\
-                                        " and an int defining the size control feature array.")
-    
+                                        " and ints defining the sizes of the control, environmental, and sensory features, in that order.")
+        #e.g.
+        #return [pymunkThingy], numControlFeatures, numEnvironmentalFeatures, numSensoryFeatures
+        
     def step(self, dt):
         """This method should be overwritten to
-            1. update _spi_data, if needed
+            1. update _cts_data, if needed
             2. update node with incoming control features
         'dt' is delta time. this must be passed so that the node can keep track of rates of change.
         Overwrite this method.
         """
-        raise NotImplementedError("step must be implemented in child classes. It should incorporate set control features and update _spi_data.")
+        raise NotImplementedError("step must be implemented in child classes. It should incorporate set control features and update _cts_data.")
     #---</Overwrite These!>---
 
 class DeltaX(BaseNode):
@@ -164,7 +195,7 @@ class DeltaX(BaseNode):
         
         np.roll(self.points, 1) #roll array for new entry
         
-        self._spi_update_worldXYs() #update global coordinates
+        self._update_worldXYs() #update global coordinates
         
         #get deltax by subtracting the last x from the current x of the only body
         #FIXME shouldn't this index be 0?
@@ -175,7 +206,7 @@ class DeltaX(BaseNode):
         #average over the points, weighting with avgWeights
         f = np.average(self.points, weights=self.avgWeights)
         
-        self._spi_data['sensory'] = np.array(f)
+        self._cts_data['sensory'] = np.array(f)
     
 class SpiMuscle(BaseNode):
     """Define the muscle node.
@@ -208,10 +239,10 @@ class SpiMuscle(BaseNode):
         """
         
         #set the environmental array to the length of the muscle.
-        self._spi_data['environmental'] = np.array(self._get_length())
+        self._cts_data['environmental'] = np.array(self._get_length())
         
         #set to the first/only value in the control array.
-        self.muscle.restLength = self._spi_data['control'][0]
+        self.muscle.restLength = self._cts_data['control'][0]
         
 
 class BalanceNode(BaseNode):
@@ -258,7 +289,7 @@ class BalanceNode(BaseNode):
         
         self.last = current
         
-        self._spi_data['environmental'] = np.array([current, self.deltaOverDT])
+        self._cts_data['environmental'] = np.array([current, self.deltaOverDT])
 
 
 def node_dict():

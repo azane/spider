@@ -1,210 +1,172 @@
-import numpy
-import pandas
-import matplotlib.pyplot as pyplot
-import pylab as pylab
-
-"""
-
-remember that one of the main premises is that the series data is not stored perpetually, but rather converted to a (or many) predictor functions.
-    this allows for a very compact storage of complex interactions. as new information comes in, the models are updated and refined.
-    acting on these functions is pheasable...as opposed to an enormous set of points and clusters. like...100*100 vs 100^100. O_o
-
-"""
+import numpy as np
 
 class SpiderBrain(object):
     def __init__(self, physiology):
         object.__init__(self)
         
-        self.physiology = physiology #a SpiderPhysiology object passed in from the world so the brain can access the muscles.
-                                        #FIXME why is this passed in from the world? why can't it be generated here.
+        #a SpiderPhysiology object passed in from the world so the brain can access it's body.
+        self.physiology = physiology
         
-        #muscles are nodes as far as the brain is concerned. #FIXME just combine these in physiology.
-        self.allNodes = []
-        self.allNodes.extend(self.physiology.muscles)
-        self.allNodes.extend(self.physiology.nodes)
+        self.allNodes = self.physiology.nodes
         
-        ##All things set to None are shaped in self.__define_series()
+        #----<Data Recording Values>----
+        #the max amount of experiential points to keep stored. once this value exceeded, the oldest data will be discarded.
+        self.dataSize = 10000
         
-        self.cts = None #the current time step, cts. rows by object, columns by info element.
+        #the number of points generated for each moment. i.e. the distance along the time axis data is generated.
+        #   TODO we might want to consider lookBack as a max, over which we cast the sensor over n, but at increasing intervals (log probs) as max is approached
+        self.lookBack = 25
         
-        #2d over t, with self.cts flattened over each object's info elements.
-        #FIXME maybe this should be an appendable list of numpy arrays (coords) that are all lumped together in data
-        self.series = None #rows along t, columns are the flattened version of self.cts with nans removed.
+        #the size of the time series.
+        #   this denotes how long data is stored in the time series. for graphing purposes, it may be valuable for this to exceed 
+        #    lookBack, but if visualization is not of concern, this should equal lookback, but never be less than lookback.
+        self.seriesSize = self.lookBack
+        #   if seriesSize can ever be defined apart from lookBack, include this assertion, or use an additive model.
+        #assert self.seriesSize >= self.lookBack, "seriesSize must be >= lookBack"
         
-        #FIXME will we eventually need a self.data for EACH sensor we want to cast over n? for this stage, just one....maybe multiple are pheasible.
-        #2d as a list of coordinates.
-        #this differes from series in that many coordinates are generated over self.lookback for each timestep of self.series.
-        self.data = None #the array to which self.cts is appended after all information is gathered to self.ct for that timestep.
-        self.dataStore = 7000 #this denotes the amount of coordinates to keep on hand, in memory. these are cleared out as they are processed,
-                                # so it's possible that this may never fill up.
+        #the interval at which the current time step, cts, is updated.
+        self.stepInterval = 0.05
         
-        #FIXME we might want to consider lookBack as a max, over which we cast the sensor over n, but at increasing intervals (log probs) as max is approached
-        self.lookBack = 25 #this is how many points are generated over n at each moment.
-        self.timeStep = 0.05 #the interval at which cts is updated.
-        self.dtAgg = 0 #the counter checked against self.timeStep to increment series data.
-        self.seriesSize = self.lookBack #this denotes how long data is stored in the time series. for graphing purposes, it may be valuable for this to exceed 
-                                                #lookBack, but if visualization is not of concern, this should equal lookback, but never be less than lookback.
-        #so, for each call to self.step_data, self.lookback points are generated, where the dt between each is self.timestep
-        #further, the time series are dumped after self.lookback*self.timestep
+        #delta time aggregated, the counter
+        self._dtAgg = 0
         
-        if self.seriesSize < self.lookBack: ValueError("seriesSize must be >= lookBack.") #should we put an error in here, or change to a +self.lookBack model?
+        #In summary: for each call to self.step_data, self.lookBack points are generated, where the dt between each is self.timestep.
+        #----</Data Recording Values>----
         
+        #define the data holding arrays in the name of pre-allocation.
+        #   It defines:
+        #       1. self.x_timeSeries
+        #       2. self.y_timeSeries
+        #       3. self.x_data
+        #       4. self.y_data
         self.__define_series()
         
-        
     def __define_series(self):
+        """Preps arrays in the name of pre-allocation.
+            1. A series of control features and environmental features: x
+            2. A series of sensory features: y
+            3. A data store holding x data cast over the time axis.
+            4. A data store holding y corresponding to rows in #3.
+           Also verifies node data shapes and numpyness.
+        """
         
-        #FIXME document this more/ensure it? physiologies must be ordered, i.e., they must return objects in the same order every time.
+        xWidth = 0
+        yWidth = 0
         
-        total = 0
-        pDatList = []
-        
-        for i, p in enumerate(self.allNodes):
-            if p.environment or p.sensor: #only if data should be recorded
-                pDatLen = len(p.spi_get_info())
-                #print "pDatLen: " + str(pDatLen)
+        #iterate nodes to get the number of array columns needed.
+        for node in self.allNodes:
+            cts_data = node.get_data()
             
-                pDatList.append(pDatLen)
+            c = cts_data['control'].size  # control features
+            e = cts_data['environmental'].size  # environmental features
+            s = cts_data['sensory'].size  # sensory features
             
-                total = total + pDatLen
+            xWidth += c + e
+            yWidth += s
         
-        #print str(i) + ", " + str(max(*pDatList))
+        #Use np.zeros, defaulting to float dtype, so in-place modification can occur.
+        #create empty time series arrays using the specified series size, and inferred widths.
+        self.x_timeSeries = np.zeros((self.seriesSize, xWidth))
+        self.y_timeSeries = np.zeros((self.seriesSize, yWidth))
         
-        #set self.cts as a box array with nans. when the cts is updated, nans will be overwritten as required.\
-        self.cts = numpy.full((i+1, max(*pDatList)), numpy.nan) #this array's memory allotment will remain, but the numbers will shift around for each timestep.
-        
-        #print self.cts
-        
-        self.series = numpy.full((self.seriesSize, total), numpy.nan) #set size of series, each coordinate is the flattened version of self.cts without nans.
-        #print "total: " + str(total)
-        #print "self.series: "
-        #print self.series
-        #print
-        
-        #total+2 because of the additional n dimension, and the addition of the output sensor.
-        #   note that the output sensor cast over n may be present as an input as well.
-        self.data = numpy.full((self.dataStore, total+2), numpy.nan)
-        #print "self.data: "
-        #print self.data
-        #print
-    def step(self, dt):
-        
-        #check timestep.
-        self.dtAgg = self.dtAgg + dt
-        if self.dtAgg < self.timeStep:
-            return
-        #if it passes, reset dtAgg
-        self.dtAgg = 0
-        
-        #The array modifications in this method shy away from replacing anything alotted in __define_series()
-        #FIXME though i'm not actually sure if numpy.roll() doesn't make a copy of the array... : / it seems fast enough, so maybe whatevs.
-        
-        sensorList = [] #the list of sensor indices
-        
-        #gather info from physiology and update the current time step.
-        ctsIndex = -1 #counter for how far through the cts array we are. start at -1 cz index.
-        for i, p in enumerate(self.allNodes):
-            p.step(dt)
-            if p.environment or p.sensor:
-                temp = numpy.asarray(p.spi_get_info(), dtype=numpy.float64)
-                #for the relevant row, fill only as many columns as are returned, leaving the rest nan.
-                self.cts[i-1][:numpy.ma.size(temp)] = temp
-                ctsIndex = ctsIndex + 1
-            
-            if p.sensor:
-                sensorList.append(ctsIndex) #this was updated in the last conditional, so no need for a +1
-        
-        #flatten and remove nans
-        tempCurrent = self.cts.flatten() #flatten to coordinate shape
-        tempCurrent = tempCurrent[~numpy.isnan(tempCurrent)] #remove nans
-        
-        #load this coordinate into the time series array.
-            #roll series array
-        self.series = numpy.roll(self.series, 1, axis=0) #FIXME verify that this doesn't reallocate memory.
-            #replace the first (rolled, so the "last") element with the new data.
-        self.series[0] = tempCurrent
-        
-        print "tempCurrent/self.series[0]:"
-        print self.series[0]
-        print
-        
-        
-        #FIXME for now, just take the first element in the list, later, we might want to iterate over this to generate data for many sensors cast over n.
-        sIndex = sensorList[0]
-        
-        
-        print "self.data pre-roll: "
-        print self.data
-        print
-        #roll self.data self.lookback times, prep for fill.
-        self.data = numpy.roll(self.data, self.lookBack, axis=0) #FIXME verify that this doesn't reallocate memory.
-        print "self.data post-roll: "
-        print self.data
-        print
-        
-        #dView = self.data[:self.lookBack, :] #get view of the newly rolled section of self.data
-        
-        #broadcast self.series over self.lookBack to dView, this will leave a space for n, as self.data rows are 1 longer than self.series rows.
-        self.data[:self.lookBack, :-2] = self.series[:self.lookBack, :]
-        print "self.data post-series-broadcast: "
-        print self.data
-        print
-        
-        #init an array with self.lookBack rows and fill it with the value of the sensor
-        sensorColumn = numpy.full(self.lookBack, tempCurrent[sIndex])
-        print "sensorColumn: "
-        print sensorColumn
-        print
-        #broadcast this array onto the last element of the data coordinates, the sensor
-        self.data[:self.lookBack, -1] = sensorColumn
-        print "self.data post-sensorColumn broadcast: "
-        print self.data
-        print
-        
-        #for n: init an array with an indexical distribution over the range self.lookBack, from 0:(self.lookBack-1), 2d, with self.lookBack rows and 1 column.
-        nRange = numpy.arange(self.lookBack) * (-1) #turn negative so that "back in time" is negative. not really mathematically important, except for consistency.
-        print "nRange: "
-        print nRange
-        print
-        #broadcast this array onto the last element in each row of dView
-        self.data[:self.lookBack, -2] = nRange
-        
-        print "self.data post-nRange broadcast"
-        print self.data
-        print
-        
-        print
-        print "--------------------------------------------------------------"
-        print
-        print
-        
-    def plot_time_series(self):
-        
-        """m1Series = self.series[:,[2]].flatten() #i think these are the right ones?
-        m2Series = self.series[:,[4]].flatten() #?
-        n1Series = self.series[:,[7]].flatten()"""
-        
-        
-        testSeries = [1, 2, 3]
-        #print "testSeries:"
-        #print testSeries
-        
-        pyplot.plot(testSeries)
-        pyplot.show()
-        
-    def series_to_csv(self, dest="foo.csv", columns=[]):
-        
-        #TODO change the defaults, and finish this method. or throw it away.....? probs that.
-        
-        #FIXME columns needs to select all the columns by default, but it keeps throwing "baddy synax" errors when it's defined apart from an arr-like.
-        
-        data = self.series[:,columns]
-        
-        numpy.savetxt(dest, data, fmt='%.3f', delimiter=",")
+        #create empty arrays using the specified data size and inferred widths.
+        #   x_data will hold sensory feature values as well.
+        #   y_data will only hold sensory feature values paired with x values and sensor values that are cast over time.
+        self.x_data = np.zeros((self.dataSize, xWidth+yWidth))
+        self.y_data = np.zeros((self.dataSize, yWidth))
     
-    def data_to_csv(self, dest="foo.csv"):
+    def step(self, dt):
+        """Retrieves data, steps the time series, and stores points generates over the time axis in data.
+        This method, and the ones it calls, (I think/hope) do not re-allocate memory to the data arrays.
+        """
         
-        numpy.savetxt(dest, self.data, fmt='%.3f', delimiter=",")
+        #check elapsed time.
+        self._dtAgg += dt
+        if self._dtAgg < self.timeStep:
+            return
+        else:
+            self._dtAgg = 0
         
+        self._update_series()
+        self._generate_data_over_time()
+    
+    def _shift_and_one(self, array, shift=1):
+        """Shift 2d array by rows and turn the recycled rows into ones.
+        """
+        assert array.ndim == 2, "The array must be 2d."
+        #assert dtype, because in place operations won't convert on the fly.
+        assert array.dtype is np.dtype('float64'), "The array must be float64."
         
+        np.roll(array, shift=shift, axis=0)
         
+        #prep for sneaky-mom in-place value setting.
+        #   NOTE: this method of assignment acts in place for numpy arrays.
+        #   make entire shift equal zero
+        array[0:shift] *= 0.
+        #   make entire shift equal one
+        array[0:shift] += 1.
+    
+    def _update_series(self):
+        """Updates both series with current time step data.
+        """
+        #---<Prep Series>---
+        self._shift_and_one(self.x_timeSeries)
+        self._shift_and_one(self.y_timeSeries)
+        #---</Prep Series>---
+        
+        #---<Update Series[0]>---
+        x_cLoc = 0 #track the column location for slicing.
+        y_cLoc = 0
+        for node in self.allNodes:
+            #step nodes and retrieve the data.
+            cts_data = node.step_and_get_data(dt)
+            
+            #get cts_data sizes
+            c = cts_data['control'].size  # control features
+            e = cts_data['environmental'].size  # environmental features
+            s = cts_data['sensory'].size  # sensory features
+            
+            #NOTE: the series[0] now equals 1, multiplying by an array effectively assigns that array, in place.
+            #set control feature values
+            self.x_timeSeries[0,x_cLoc:c] *= cts_data['control']
+            x_cLoc += c
+            
+            #set environmental feature values
+            self.x_timeSeries[0,x_cLoc:e] *= cts_data['environmental']
+            x_cLoc += e
+            
+            #set sensory feature values
+            self.y_timeSeries[0,y_cLoc:s] *= cts_data['sensory']
+            y_cLoc += s
+        #---</Update Series[0]>---
+    
+    def _generate_data_over_time():
+        """Updates x_data and y_data, pairing points over the time axis.
+            
+            After discarding old data, sets x data to both series,
+                and sets y data to the current y value for all the new x points,
+                effectively casting sensor data over control and environmental data.
+        """
+        #---<Prep data store>---
+        #shift out old data, and turn the first lookBack rows into 1s
+        self._shift_and_one(self.x_data, shift=self.lookBack)
+        self._shift_and_one(self.y_data, shift=self.lookBack)
+        #---</Prep data store>---
+        
+        #collect widths
+        xWidth = self.x_timeSeries.shape[1]
+        yWidth = self.y_timeSeries.shape[1]
+        
+        #multiply the 1s in lookBack rows of x_data by the both time series arrays,
+        #   i.e. assign the timeSeries array to the first lookBack rows of data, and to the xWidth column.
+        self.x_data[self.lookBack,0:xWidth] *= self.x_timeSeries  # assign x vals
+        self.x_data[self.lookBack,xWidth:yWidth] *= self.y_timeSeries  # assign y vals
+        
+        #assign the first lookBack rows of y_data to the most recent value in the y series.
+        #   this requires adding a dimension to broadcast over the 1s
+        self.y_data[self.lookBack] *= np.expand_dims(self.y_timeSeries[0], 0)
+    
+    def data_to_npz(self, dest):
+        
+        np.savez(dest, x=self.x_data, y=self.y_data)
+    
