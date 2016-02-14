@@ -223,7 +223,6 @@ class SpiderPhysiology(object):
                                 environment=m[2], spi_originalLength=restingLength)
             #muscle = pymunk.PinJoint(segs[fBI]['body'], segs[sBI]['body'], f_point, s_point)
             #give muscle another property, spi_prefixed.
-            muscle.spi_originalLength = restingLength #FIXME huh? just add this to the class?
             
             muscle.environment = m[2] #set whether or not this muscle will be considered in data collection.
             

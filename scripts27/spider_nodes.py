@@ -1,4 +1,4 @@
-import pymunk
+import pymunk as pymunk
 from pymunk import Vec2d
 import numpy as np
 import math
@@ -32,51 +32,68 @@ Question: Should these nodes be built to return as much information as possible.
 #           then, if the physiology mutates to take advantage of that particular node initialization argument, good!
 #               but, if not, the values are still generated over the correct range.
 
+#FIXME now that inheritance from pymunk classes has been removed, make these classes use the 'super' initialization functionality.
 
 class BaseNode(object):
     """The base class for all nodes, including muscles.
     When initializing:
-        'body' is the body to which the node will be attached.
-        'anchorPoint' is the point, relative to the body, of attachment to that body.
-        'shapeGroup' is ??
+        'anchorBodies' is a list of the bodies to which the node will be anchored. This is usually a list of one element.
+        'anchorPoints' is a list of the points, relative to the body of the same index in anchorBodies, of attachment to that body.
+                        This is usually a list of one element.
+        'shapeGroup' . shapes in the same non-zero group do not collide. in other words, a non-self-colliding node should have a non-zero shape group.
+                        and all shapes of the built node should use self.shapeGroup
+        'numAnchors' is the number of anchors. if this is passed, then the length of the anchor lists are verified.
     """
     
-    #FIXME this class uses the spi_ prefix to prevent namespace conflicts with doubly inherited pymunk classes.
-    #       but, i think it's probably better to not have nodes inherit from pymunk classes, and instead just have those objects as node elements.
-    #      this fix will require a rewrite of the SpiMuscle node.
+    #FIXME this class used the spi_ prefix to prevent namespace conflicts with doubly inherited pymunk classes.
+    #       but, that double inheritance has been removed, so we don't need the prefixes anymore.
     
-    def __init__(self, body, anchorPoint, shapeGroup):
+    def __init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=None):
         object.__init__(self)
         
-        self.anchorBody = body
-        self.anchorPoint = anchorPoint
+        assert type(anchorBodies) is list
+        assert type(anchorPoints) is list
+        if numAnchors is not None:
+            assert type(numAnchors) is int
+            assert len(anchorBodies) == numAnchors, "There should be " + str(numAnchors) + " anchorBody(ies) in the list."
+            assert len(anchorPoints) == numAnchors, "There should be " + str(numAnchors) +  " anchorPoint(s) in the list."
+        
+        self.anchorBodies = anchorBodies
+        self.anchorPoints = anchorPoints
         self.shapeGroup = shapeGroup
         
-        #this updates the initial coordinate of the node center. this is not called any other time, by default.
-        self.worldX, self.worldY = self._spi_update_worldXY()
+        #this updates the initial coordinates of the node's anchor points in self.worldXYs. unless added in child classes, this is the only call to this method.
+        #       i.e. by default, self.worldXYs only holds the values when the node was initialized.
+        self._spi_update_worldXYs()
         
         #build node
-        self._spi_node_elements, self._spi_controlSize = self._spi_build_node()
-        assert type(self._spi_node_elements) is list, "_spi_build_node must return a list as the first return value."
-        assert type(self._spi_controlSize) is int, "_spi_build_node must return an int as the second return value."
+        self._spi_node_elements, self._spi_controlSize = self._build_node()
+        assert type(self._spi_node_elements) is list, "_build_node must return a list as the first return value."
+        assert type(self._spi_controlSize) is int, "_build_node must return an int as the second return value."
         
         #initialize control feature array size.
+        #   control size must be defined during construction.
+        #       this size is verified on every set and retrieve to guarantee that it does not change after construction.
+        #   environmental and sensory should be set in step, but because the spider only reads these, the spider can just infer the size on retrieval.
         self._spi_data = {
-                            'environmental': None,
+                            'environmental': np.zeros(0),
                             'control': np.zeros(self._spi_controlSize),
-                            'sensory': None
+                            'sensory': np.zeros(0)
                         }
         
-    def _spi_update_worldXY(self):
-        """Return worldX and worldY.
+    def _spi_update_worldXYs(self):
+        """Return worldX and worldY of the anchorBodies and anchor points..
         Do not overwrite this method.
         """
-        return self.anchorBody.local_to_world(self.anchorPoint)
+        
+        self.worldXYs = [ab.local_to_world(self.anchorPoints[i]) for i, ab in enumerate(self.anchorBodies)]
     
     def spi_get_info(self):
-        """Return the data dictionary after updating it.
+        """Return the data dictionary.
         Do not overwrite this method.
         """
+        assert self._spi_data['control'].shape == (self._spi_controlSize,), "The control array does not match the size defined during construction."
+        
         return self._spi_data
     
     def spi_set_control_features(self, control_array):
@@ -84,7 +101,7 @@ class BaseNode(object):
         Do not overwrite this method.
         """
         assert type(control_array) is np.ndarray
-        assert control_array.shape == self._spi_data['control'].shape
+        assert control_array.shape == (self._spi_controlSize,), "The control array does not match the size defined during construction."
         #dtype assertions?
         
         self._spi_data['control'] = control_array
@@ -95,7 +112,7 @@ class BaseNode(object):
         Convenience method.
         Do not overwrite this method.
         """
-        self.spi_step(dt)
+        self.step(dt)
         return self.spi_get_info()
     
     def spi_node_elements(self):
@@ -104,30 +121,31 @@ class BaseNode(object):
         return self._spi_node_elements
         
     #---<Overwrite These!>---
-    def _spi_build_node(self):
+    def _build_node(self):
         """This method should be overwritten to
              1. return a list of individual node elements
              2. return the size of the control feature array
         Overwrite this method.
         """
-        raise NotImplementedError("'_spi_build_node' must be implemented in child classes."+\
+        raise NotImplementedError("'_build_node' must be implemented in child classes."+\
                                     " It must build and return a list of pymunk elements for drawing and physics,"+\
                                         " and an int defining the size control feature array.")
     
-    def spi_step(self, dt):
+    def step(self, dt):
         """This method should be overwritten to
             1. update _spi_data, if needed
             2. update node with incoming control features
+        'dt' is delta time. this must be passed so that the node can keep track of rates of change.
         Overwrite this method.
         """
-        raise NotImplementedError("spi_step must be implemented in child classes. It should incorporate set control features and update _spi_data.")
+        raise NotImplementedError("step must be implemented in child classes. It should incorporate set control features and update _spi_data.")
     #---</Overwrite These!>---
 
 class DeltaX(BaseNode):
     """The goal of this node is merely to track a moving average of DeltaX over a period.
     """
-    def __init__(self, body, anchorPoint, shapeGroup, mavgPeriod=25, mavgPoints=100, **kwargs):
-        BaseNode.__init__(self, body, anchorPoint, shapeGroup, **kwargs)
+    def __init__(self, anchorBodies, anchorPoints, shapeGroup, mavgPeriod=25, mavgPoints=100):
+        BaseNode.__init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=1)
         
         self.points = np.zeros(mavgPoints)
         
@@ -137,22 +155,16 @@ class DeltaX(BaseNode):
         
         self.avgWeights = None #TODO generate a np array across an inverted log() for weight
         
-        self.lastX = self.worldX #init the lastX value to the initial worldX value.
+        self.lastX = self.worldXYs[0][0] #init the lastX value to the initial worldX value of the only body.
         
     
-    def spi_node_elements(self):
-        return []  # nothing to see here.
+    def _build_node(self):
+        #this node has nothing that needs drawn or is involved in physics. and it has no control features.
+        return [], 0
         
-    def spi_get_info(self):
-        
-        f = np.average(self.points, weights=self.avgWeights)
-        
-        #print "deltaX avg: " + str(f)
-        
-        return [f]
-        
-    def spi_step(self, dt):
-        
+    def step(self, dt):
+        """Calculates moving average and sets updates data dictionary.
+        """
         self.dtAgg = self.dtAgg + dt #increment counter.
         
         #if the counter is less than the target, don't do anything.
@@ -161,68 +173,71 @@ class DeltaX(BaseNode):
         
         np.roll(self.points, 1) #roll array for new entry
         
-        self._update_worldXY() #update global coordinates (worldX)
+        self._spi_update_worldXYs() #update global coordinates
         
-        self.points[1] = self.worldX - self.lastX #store delta x
+        #get deltax by subtracting the last x from the current x of the only body
+        #FIXME shouldn't this index be 0?
+        self.points[1] = self.worldXYs[0][0] - self.lastX
         
-        self.lastX = self.worldX #update lastX to this worldX for next time.
+        self.lastX = self.worldXYs[0][0] #update lastX to this worldX for next time.
         
+        #average over the points, weighting with avgWeights
+        f = np.average(self.points, weights=self.avgWeights)
+        
+        self._spi_data['sensory'] = np.array(f)
     
-class SpiMuscle(pymunk.DampedSpring, BaseNode):
+class SpiMuscle(BaseNode):
+    """Define the muscle node.
+    """
+    def __init__(self, anchorBodies, anchorPoints, shapeGroup, restLength, stiffness, damping):
+        BaseNode.__init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=2)
+        
+        self.originalLength = restLength
     
-    """this 'node' inherits from the pymunk DampedSpring and BaseNode.
-    Muscles are grouped with other nodes for drawing, updating, and data collection."""
-    def __init__(self, *args, **kwargs):
-        
-        #NOTE: pymunk.DampedSpring does not use super(), so we need to do it this way.
-        if args:
-            raise AttributeError("SpiMuscle only accepts key word arguments. Normal arguments an be defined as key words.")
-        pymunk.DampedSpring.__init__(self, **kwargs)
-        
-        #<---BaseNode.__init__ Replacement>
-        #don't call BaseNode.__init__, as the body and anchors are tracked by DampedSpring
-        #   but we do need a few things.
-        #set for muscles.
-        #self.environment = True
-        #self.sensor = False
-        self.environment = environment
-        self.sensor = sensor
-        #<---BaseNode.__init__ Replacement>
-        
-        self.spi_originalLength = spi_originalLength
-        
-        self.last = self._spi_get_length() #for delta
-        
-        self.deltaOverDT = 0 #set delta to zilcho
-    
-    def _spi_get_length(self):
-        aWorld = self.a.local_to_world(self.anchr1)
-        bWorld = self.b.local_to_world(self.anchr2)
+    def _get_length(self):
+        """Return the current length of the muscle.
+        """
+        aWorld = self.muscle.a.local_to_world(self.muscle.anchr1)
+        bWorld = self.muscle.b.local_to_world(self.muscle.anchr2)
         
         return np.sqrt(aWorld.get_dist_sqrd(bWorld))
-        
-    def spi_get_info(self):
-        
-        return [self._spi_get_length()]
-        #return [self._spi_get_length(), self.deltaOverDT] #to be consistent with a "max information" philosophy.
     
-    def spi_node_elements(self):
-        #return a list of node elements. the muscle uses itself, as it inherits from DampedSpring.
-        return [self]
+    def _build_node(self):
+        """Return a list of node elements to draw.
+           Return the size of the conrol feature array.
+           """
+        self.muscle = pymunk.DampedSpring(a=anchorBodies[0], b=anchorBodies[1],
+                                            anchr1=anchorPoints[0], anchr2=anchorPoints[1],
+                                            restLength=restLength, stiffness=stiffness, damping=damping)
         
-    def spi_step(self, dt):
-        current = self._spi_get_length()
+        return [self.muscle], 1
         
-        self.deltaOverDT = (current - self.last)/dt
+    def step(self, dt):
+        """Retrieve control features and update the data dictionary.
+        """
         
-        self.last = current
+        #set the environmental array to the length of the muscle.
+        self._spi_data['environmental'] = np.array(self._get_length())
+        
+        #set to the first/only value in the control array.
+        self.muscle.restLength = self._spi_data['control'][0]
+        
 
 class BalanceNode(BaseNode):
-    def __init__(self, body, anchorPoint, shapeGroup, **kwargs):
-        BaseNode.__init__(self, body, anchorPoint, shapeGroup, **kwargs)
+    def __init__(self, anchorBodies, anchorPoints, shapeGroup):
+        BaseNode.__init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=1)
         
         #store original anchorBody angle.
-        self.origAnchorAngle = self.anchorBody.angle
+        self.origAnchorAngle = self.anchorBodies[0].angle
+    
+    def _get_balance(self):
+        a = (self.segBody.angle - (self.anchorBodies[0].angle - self.origAnchorAngle))
+        
+        fa = np.arcsin(np.sin(a)) #i don't really know how it works, but this is a succinct way to get the range between -pi and pi. yay trig.
+        #print fa
+        return fa
+    
+    def _build_node(self):
         
         #create a "plumb" segment connected to the circle.
         segMass = 1
@@ -233,45 +248,26 @@ class BalanceNode(BaseNode):
         self.segBody = pymunk.Body(segMass, segMoment)
         segShape = pymunk.Segment(self.segBody, a, b, 1)
         segShape.group = self.shapeGroup
-        segShape.sensor = True
-        self.segBody.position = (self.worldX, self.worldY) #position at the node's world anchor point.
+        #segShape.sensor = True #TODO get rid of this line if it doesn't throw errors being gone.
+        self.segBody.position = self.worldXYs[0] #position at the node's world anchor point.
         
         #create a pivot joint from the circle to the segment
-        segJoint = pymunk.PivotJoint(self.anchorBody, self.segBody, self.anchorPoint, (0,0))
-        
-        self.elements = [self.segBody, segShape, segJoint]#, self.cBody, cShape, cJoint, cRotaryLimit]
+        segJoint = pymunk.PivotJoint(self.anchorBodies[0], self.segBody, self.anchorPoints[0], (0,0))
         
         self.last = self._get_balance() #the last balance.
         self.deltaOverDT = 0 #start slope at 0
         
-        
-    def spi_node_elements(self):
-        #FIXME build the elements in here, not in __init__
-        return self.elements
+        #return element list and control array size.
+        return [self.segBody, segShape, segJoint], 0
     
-    def spi_get_info(self):
-        #return [self.deltaOverDT]
-        return [self._get_balance()]
-    
-    def _get_balance(self):
-        a = (self.segBody.angle - (self.anchorBody.angle - self.origAnchorAngle))
-        
-        fa = np.arcsin(np.sin(a)) #i don't really know how it works, but this is a succinct way to get the range between -pi and pi. yay trig.
-        #print fa
-        return fa
-    def spi_step(self, dt):
+    def step(self, dt):
         current = self._get_balance()
         
         self.deltaOverDT = (current - self.last)/dt
         
         self.last = current
-
-"""brainstorming
-
-the control features' node affectation should happen in the code of those nodes.
-    this makes the most sense as far as
-
-"""
+        
+        self._spi_data['environmental'] = np.array([current, self.deltaOverDT])
 
 
 def node_dict():

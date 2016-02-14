@@ -104,7 +104,7 @@ class SpiderBrain(object):
         #gather info from physiology and update the current time step.
         ctsIndex = -1 #counter for how far through the cts array we are. start at -1 cz index.
         for i, p in enumerate(self.allNodes):
-            p.spi_step(dt)
+            p.step(dt)
             if p.environment or p.sensor:
                 temp = numpy.asarray(p.spi_get_info(), dtype=numpy.float64)
                 #for the relevant row, fill only as many columns as are returned, leaving the rest nan.
