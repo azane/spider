@@ -11,18 +11,13 @@ class SpiderBrain(object):
         
         #----<Data Recording Values>----
         #the max amount of experiential points to keep stored. once this value exceeded, the oldest data will be discarded.
-        self.dataSize = 10000
+        self.dataSize = 5000
         
         #the number of points generated for each moment. i.e. the distance along the time axis data is generated.
         #   TODO we might want to consider lookBack as a max, over which we cast the sensor over n, but at increasing intervals (log probs) as max is approached
         self.lookBack = 25
-        
-        #the size of the time series.
-        #   this denotes how long data is stored in the time series. for graphing purposes, it may be valuable for this to exceed 
-        #    lookBack, but if visualization is not of concern, this should equal lookback, but never be less than lookback.
-        self.seriesSize = self.lookBack
-        #   if seriesSize can ever be defined apart from lookBack, include this assertion, or use an additive model.
-        #assert self.seriesSize >= self.lookBack, "seriesSize must be >= lookBack"
+        #this is the column that will attached to the new data entries to mark the time axis.
+        self.lookBackColumn = np.expand_dims(np.arange(self.lookBack)*-1., 1)
         
         #the interval at which the current time step, cts, is updated.
         self.stepInterval = 0.05
@@ -66,13 +61,14 @@ class SpiderBrain(object):
         
         #Use np.zeros, defaulting to float dtype, so in-place modification can occur.
         #create empty time series arrays using the specified series size, and inferred widths.
-        self.x_timeSeries = np.zeros((self.seriesSize, xWidth))
-        self.y_timeSeries = np.zeros((self.seriesSize, yWidth))
+        self.x_timeSeries = np.zeros((self.lookBack, xWidth))
+        self.y_timeSeries = np.zeros((self.lookBack, yWidth))
         
         #create empty arrays using the specified data size and inferred widths.
-        #   x_data will hold sensory feature values as well.
+        #   x_data will hold control, environmental, and sensory features,
+        #       AND the time axis marking the number of timeIntervals until the reported sensor value actualized.
         #   y_data will only hold sensory feature values paired with x values and sensor values that are cast over time.
-        self.x_data = np.zeros((self.dataSize, xWidth+yWidth))
+        self.x_data = np.zeros((self.dataSize, xWidth+yWidth+1))
         self.y_data = np.zeros((self.dataSize, yWidth))
     
     def step(self, dt):
@@ -82,22 +78,23 @@ class SpiderBrain(object):
         
         #check elapsed time.
         self._dtAgg += dt
-        if self._dtAgg < self.timeStep:
+        if self._dtAgg < self.stepInterval:
             return
         else:
             self._dtAgg = 0
         
-        self._update_series()
+        self._update_series(dt)
         self._generate_data_over_time()
     
     def _shift_and_one(self, array, shift=1):
         """Shift 2d array by rows and turn the recycled rows into ones.
         """
         assert array.ndim == 2, "The array must be 2d."
-        #assert dtype, because in place operations won't convert on the fly.
+        #because in place operations won't convert dtypes on the fly.
         assert array.dtype is np.dtype('float64'), "The array must be float64."
         
-        np.roll(array, shift=shift, axis=0)
+        #FIXME 38bgkdlsien this allocates an entire copy. can't do this. need a way to roll without reallocating.
+        array = np.roll(array, shift=shift, axis=0)
         
         #prep for sneaky-mom in-place value setting.
         #   NOTE: this method of assignment acts in place for numpy arrays.
@@ -105,13 +102,16 @@ class SpiderBrain(object):
         array[0:shift] *= 0.
         #   make entire shift equal one
         array[0:shift] += 1.
+        
+        #FIXME 38bgkdlsien <- when this is fixed, we shouldn't need to return anything.
+        return array
     
-    def _update_series(self):
+    def _update_series(self, dt):
         """Updates both series with current time step data.
         """
         #---<Prep Series>---
-        self._shift_and_one(self.x_timeSeries)
-        self._shift_and_one(self.y_timeSeries)
+        self.x_timeSeries = self._shift_and_one(self.x_timeSeries)
+        self.y_timeSeries = self._shift_and_one(self.y_timeSeries)
         #---</Prep Series>---
         
         #---<Update Series[0]>---
@@ -128,19 +128,19 @@ class SpiderBrain(object):
             
             #NOTE: the series[0] now equals 1, multiplying by an array effectively assigns that array, in place.
             #set control feature values
-            self.x_timeSeries[0,x_cLoc:c] *= cts_data['control']
+            self.x_timeSeries[0,x_cLoc:x_cLoc+c] *= cts_data['control']
             x_cLoc += c
             
             #set environmental feature values
-            self.x_timeSeries[0,x_cLoc:e] *= cts_data['environmental']
+            self.x_timeSeries[0,x_cLoc:x_cLoc+e] *= cts_data['environmental']
             x_cLoc += e
             
             #set sensory feature values
-            self.y_timeSeries[0,y_cLoc:s] *= cts_data['sensory']
+            self.y_timeSeries[0,y_cLoc:y_cLoc+s] *= cts_data['sensory']
             y_cLoc += s
         #---</Update Series[0]>---
     
-    def _generate_data_over_time():
+    def _generate_data_over_time(self):
         """Updates x_data and y_data, pairing points over the time axis.
             
             After discarding old data, sets x data to both series,
@@ -149,8 +149,8 @@ class SpiderBrain(object):
         """
         #---<Prep data store>---
         #shift out old data, and turn the first lookBack rows into 1s
-        self._shift_and_one(self.x_data, shift=self.lookBack)
-        self._shift_and_one(self.y_data, shift=self.lookBack)
+        self.x_data = self._shift_and_one(self.x_data, shift=self.lookBack)
+        self.y_data = self._shift_and_one(self.y_data, shift=self.lookBack)
         #---</Prep data store>---
         
         #collect widths
@@ -159,12 +159,13 @@ class SpiderBrain(object):
         
         #multiply the 1s in lookBack rows of x_data by the both time series arrays,
         #   i.e. assign the timeSeries array to the first lookBack rows of data, and to the xWidth column.
-        self.x_data[self.lookBack,0:xWidth] *= self.x_timeSeries  # assign x vals
-        self.x_data[self.lookBack,xWidth:yWidth] *= self.y_timeSeries  # assign y vals
+        self.x_data[0:self.lookBack,0:xWidth] *= self.x_timeSeries  # assign x vals
+        self.x_data[0:self.lookBack,xWidth:xWidth+yWidth] *= self.y_timeSeries  # assign y vals
+        self.x_data[0:self.lookBack,xWidth+yWidth:xWidth+yWidth+1] *= self.lookBackColumn # assign time axis vals
         
         #assign the first lookBack rows of y_data to the most recent value in the y series.
         #   this requires adding a dimension to broadcast over the 1s
-        self.y_data[self.lookBack] *= np.expand_dims(self.y_timeSeries[0], 0)
+        self.y_data[0:self.lookBack] *= np.expand_dims(self.y_timeSeries[0], 0)
     
     def data_to_npz(self, dest):
         

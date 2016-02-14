@@ -30,11 +30,8 @@ class BaseNode(object):
         '_cts_data' is the current time step data, c.t.s. data.
     """
     
-    #FIXME this class used the spi_ prefix to prevent namespace conflicts with doubly inherited pymunk classes.
-    #       but, that double inheritance has been removed, so we don't need the prefixes anymore.
-    
     def __init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=None, report=True, **kwargs):
-        super(BaseNode, self).__init__(**kwargs)
+        super(BaseNode, self).__init__(**kwargs)  # FIXME edb18290hfhd . in this case, this would not be given kwargs.
         
         assert type(anchorBodies) is list
         assert type(anchorPoints) is list
@@ -55,9 +52,16 @@ class BaseNode(object):
         
         #build node
         #   mangle the cts_data sizes to prevent post-initialization alterations.
+        #FIXME TODO edb18290hfhd what about passing **kwargs to _build_node() so that class attributes don't have to be defined above the call to super init?
+        #               and won't have to be defined as attributes at all?
+        #FIXME TODO dkgbi21938th there needs to be a way to set the starting values, at least of the control feature array.
+        #               it may be better to forego this 'size' model, and have the sizes be inferred from the starting values,
+        #                as they are returned from _build_node
         self._node_elements, self.__controlSize, self.__environmentalSize, self.__sensorySize = self._build_node()
         assert type(self._node_elements) is list, "_build_node must return a list as the first return value."
-        assert type(self._controlSize) is int, "_build_node must return an int as the second return value."
+        assert type(self.__controlSize) is int, "_build_node must return an int as the second return value: the control array size."
+        assert type(self.__environmentalSize) is int, "_build_node must return an int as the third return value: the environmental array size."
+        assert type(self.__sensorySize) is int, "_build_node must return an int as the fourth return value: the sensory array size."
         
         #initialize control feature array size.
         #   control size must be defined during construction.
@@ -93,14 +97,14 @@ class BaseNode(object):
         assert type(self._cts_data['sensory']) is np.ndarray, "The sensory array must be a numpy ndarray."
         
         #FIXME would it better to do this? or just force a flatten?
-        assert cts_data['control'].ndim == 1, "The control array must be 1 dimensional."
-        assert cts_data['environmental'].ndim == 1, "The environmental array must be 1 dimensional."
-        assert cts_data['sensory'].ndim == 1, "The sensory array must be 1 dimensional."
+        assert self._cts_data['control'].ndim == 1, "The control array must be 1 dimensional."
+        assert self._cts_data['environmental'].ndim == 1, "The environmental array must be 1 dimensional."
+        assert self._cts_data['sensory'].ndim == 1, "The sensory array must be 1 dimensional."
         
         #this enables faster processing by the brain.
-        assert cts_data['control'].dtype is np.dtype('float64'), "The control array dtype must be float64"
-        assert cts_data['environmental'].dtype is np.dtype('float64'), "The environmental array dtype must be float64"
-        assert cts_data['sensory'].dtype is np.dtype('float64'), "The sensory array dtype must be float64"
+        assert self._cts_data['control'].dtype is np.dtype('float64'), "The control array dtype must be float64"
+        assert self._cts_data['environmental'].dtype is np.dtype('float64'), "The environmental array dtype must be float64"
+        assert self._cts_data['sensory'].dtype is np.dtype('float64'), "The sensory array dtype must be float64"
         
         if self.__report:
             return self._cts_data
@@ -117,9 +121,9 @@ class BaseNode(object):
         Do not overwrite this method.
         """
         #verify incoming
-        assert type(control_array) is np.ndarray
-        assert control_array.shape == (self.__controlSize,), "The control array does not match the size defined during construction."
-        #dtype assertions?
+        assert type(control_array) is np.ndarray, "The input control array must be a numpy array."
+        assert control_array.shape == (self.__controlSize,), "The input control array does not match the size defined during construction."
+        assert control_array.dtype is np.dtype('float64'), "The input control array dtype must be float64."
         
         self._cts_data['control'] = control_array
         
@@ -181,8 +185,8 @@ class DeltaX(BaseNode):
         
     
     def _build_node(self):
-        #this node has nothing that needs drawn or is involved in physics. and it has no control features.
-        return [], 0
+        #this node has nothing that needs drawn or is involved in physics. it has 1 sensory feature.
+        return [], 0, 0, 1
         
     def step(self, dt):
         """Calculates moving average and sets updates data dictionary.
@@ -206,15 +210,19 @@ class DeltaX(BaseNode):
         #average over the points, weighting with avgWeights
         f = np.average(self.points, weights=self.avgWeights)
         
-        self._cts_data['sensory'] = np.array(f)
+        self._cts_data['sensory'] = np.array([f])
     
 class SpiMuscle(BaseNode):
     """Define the muscle node.
     """
     def __init__(self, anchorBodies, anchorPoints, shapeGroup, restLength, stiffness, damping, **kwargs):
-        super(SpiMuscle, self).__init__(anchorBodies, anchorPoints, shapeGroup, numAnchors=2, **kwargs)
         
+        #FIXME TODO find edb18290hfhd for more info.
+        self.stiffness = stiffness
+        self.damping = damping
         self.originalLength = restLength
+        
+        super(SpiMuscle, self).__init__(anchorBodies, anchorPoints, shapeGroup, numAnchors=2, **kwargs)
     
     def _get_length(self):
         """Return the current length of the muscle.
@@ -228,29 +236,40 @@ class SpiMuscle(BaseNode):
         """Return a list of node elements to draw.
            Return the size of the conrol feature array.
            """
-        self.muscle = pymunk.DampedSpring(a=anchorBodies[0], b=anchorBodies[1],
-                                            anchr1=anchorPoints[0], anchr2=anchorPoints[1],
-                                            restLength=restLength, stiffness=stiffness, damping=damping)
+        self.muscle = pymunk.DampedSpring(a=self.anchorBodies[0], b=self.anchorBodies[1],
+                                            anchr1=self.anchorPoints[0], anchr2=self.anchorPoints[1],
+                                            #can use original length because _build only gets called on init.
+                                            rest_length=self.originalLength, stiffness=self.stiffness, damping=self.damping)
         
-        return [self.muscle], 1
+        #FIXME TODO dkgbi21938th <- without this feature, the control features are all initialized to zero...
+        #                               which means all the muscles go to 0, and the spider just collapses. ; )
+        #                               also, as 20160214 implemented, the feature arrays are set to zeros after this method is called.
+        #                               so there goes the lazy workaround.
+        
+        return [self.muscle], 1, 1, 0
         
     def step(self, dt):
         """Retrieve control features and update the data dictionary.
         """
         
         #set the environmental array to the length of the muscle.
-        self._cts_data['environmental'] = np.array(self._get_length())
+        self._cts_data['environmental'] = np.array([self._get_length()])
         
         #set to the first/only value in the control array.
-        self.muscle.restLength = self._cts_data['control'][0]
+        #TEMP dkgbi21938th <- as a workaround for this...we'll just use this is as a multiplier. : )
+        #                       this may have merit, as the spider will be using a tanh output, -1, 1
+        #                        so if the control features scaled off that range, the brain wouldn't have to scale it.
+        #                        but, i imagine that that requirement might limit flexibility down the road,
+        #                        and since the brain can/should be able to handle that kind of scaling...it should.
+        #                        although, it does make sense to have '0' be the middle ground?
+        #                        ...we could do both? have the brain be able to handle scaling, but have control features scale from (-1,1)?
+        #                        perhaps it does really make sense for this node in particular. but for others, maybe not. so both it is!?
+        self.muscle.rest_length = (self._cts_data['control'][0] + 1)*self.originalLength
         
 
 class BalanceNode(BaseNode):
     def __init__(self, anchorBodies, anchorPoints, shapeGroup):
         super(BalanceNode, self).__init__(anchorBodies, anchorPoints, shapeGroup, numAnchors=1)
-        
-        #store original anchorBody angle.
-        self.origAnchorAngle = self.anchorBodies[0].angle
     
     def _get_balance(self):
         a = (self.segBody.angle - (self.anchorBodies[0].angle - self.origAnchorAngle))
@@ -260,6 +279,9 @@ class BalanceNode(BaseNode):
         return fa
     
     def _build_node(self):
+        
+        #store original anchorBody angle.
+        self.origAnchorAngle = self.anchorBodies[0].angle
         
         #create a "plumb" segment connected to the circle.
         segMass = 1
@@ -280,7 +302,7 @@ class BalanceNode(BaseNode):
         self.deltaOverDT = 0 #start slope at 0
         
         #return element list and control array size.
-        return [self.segBody, segShape, segJoint], 0
+        return [self.segBody, segShape, segJoint], 0, 1, 0
     
     def step(self, dt):
         current = self._get_balance()
@@ -289,7 +311,7 @@ class BalanceNode(BaseNode):
         
         self.last = current
         
-        self._cts_data['environmental'] = np.array([current, self.deltaOverDT])
+        self._cts_data['environmental'] = np.array([current])#, self.deltaOverDT])
 
 
 def node_dict():

@@ -29,7 +29,8 @@ class Main(pyglet.window.Window):
         
         self.fps_display = pyglet.clock.ClockDisplay()
         
-        self.spi_keys = key.KeyStateHandler() #dictionary for storing key states, updated in draw function (as of 20151012, might move), and referred to by world.
+        #dictionary for storing key states, updated in draw function (as of 20151012, might move), and referred to by world.
+        self.spi_keys = key.KeyStateHandler()
         
         
         #Last thing to do.
@@ -58,7 +59,7 @@ class Main(pyglet.window.Window):
         self.space.spi_ww = self.width
     
     def on_draw(self):
-        #overriding the window draw update class.
+        #overriding the window draw update method.
         self.clear()
         
         self.spi_update_window_to_space()

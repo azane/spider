@@ -22,13 +22,13 @@ def scale(x, index, low, high):
 def init4d(x, y):
     assert y.ndim == 1
     assert x.ndim == 2
-    assert x.shape[0] == 3
+    #assert x.shape[0] == 3
     
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d') #create subplot in figure.
     
     #set the color map to the output dimension.
-    scatPlot = ax.scatter(x[0], x[1], x[2], c=y) #create plot
+    scatPlot = ax.scatter(x[0], x[1], x[-1], c=y) #create plot
     
     ax.set_xlabel("x")
     ax.set_ylabel("y")
