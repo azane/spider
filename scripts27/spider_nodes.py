@@ -1,38 +1,19 @@
 import pymunk as pymunk
-from pymunk import Vec2d
+#from pymunk import Vec2d
 import numpy as np
-import math
 
 """This file returns a dictionary of classes that return pymunk configurations.
-        Each class inherits from the main node class that requires a body and an anchor point with which to attach.
-            nodes are not joints (though they can contain joints), and only have one attachment point.
-            though, i suppose this means that nodes are modular themselves...because it would not be difficult to have a node attached to a node.
-            though, i think the best way to provide information will be a first level access dictionary, so the first node would need to gather info
-                from its children nodes.
-        The nodes will also have various information accessible.
-            This information may be sensory, for the brain of the body to which the node belongs.
-            
-            And/or, this information may result in events in the world, and can have an effect on other elements.
-            FIXME as of 20151013, i'm not sure of the best way to have nodes interact with the world. so far, i only have a balance node and a velocity node,
-                but those only hold information for use by the spider_brain
-                maybe have the nodes handle the interactions?
-                or have an interactions module reconcile node information with everything else?
-                    then we'll have node info in multiple places...which is unnecessarily redundant.
-                """
-                
+        Each class inherits from the main node class that requires a list of bodies and anchor points to attach to.
 """
 
-Question: Should these nodes be built to return as much information as possible...or something like that, and that the brain
-    should deal with parsing out what it deems useful?
-    Or should the nodes (node writers) take some responsibility in only returning what will prove useful to the brain?
+#Question: Should these nodes be built to return as much information as possible...or something like that, and that the brain
+#    should deal with parsing out what it deems useful?
+#    Or should the nodes (node writers) take some responsibility in only returning what will prove useful to the brain?
 
-"""
 
-#TODO part of a flexible, mutateable node model might be to have sigmoidal or gaussian settings for randomly generated defaults.
+#Thought: part of a flexible, mutateable node model might be to have sigmoidal or gaussian settings for randomly generated defaults.
 #           then, if the physiology mutates to take advantage of that particular node initialization argument, good!
 #               but, if not, the values are still generated over the correct range.
-
-#FIXME now that inheritance from pymunk classes has been removed, make these classes use the 'super' initialization functionality.
 
 class BaseNode(object):
     """The base class for all nodes, including muscles.
@@ -43,13 +24,14 @@ class BaseNode(object):
         'shapeGroup' . shapes in the same non-zero group do not collide. in other words, a non-self-colliding node should have a non-zero shape group.
                         and all shapes of the built node should use self.shapeGroup
         'numAnchors' is the number of anchors. if this is passed, then the length of the anchor lists are verified.
+        'report' is a bool that determines if the node should report any data. some nodes might only be used for constraint, for example.
     """
     
     #FIXME this class used the spi_ prefix to prevent namespace conflicts with doubly inherited pymunk classes.
     #       but, that double inheritance has been removed, so we don't need the prefixes anymore.
     
-    def __init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=None):
-        object.__init__(self)
+    def __init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=None, report=True, **kwargs):
+        super(BaseNode, self).__init__(**kwargs)
         
         assert type(anchorBodies) is list
         assert type(anchorPoints) is list
@@ -61,6 +43,7 @@ class BaseNode(object):
         self.anchorBodies = anchorBodies
         self.anchorPoints = anchorPoints
         self.shapeGroup = shapeGroup
+        self.report = report
         
         #this updates the initial coordinates of the node's anchor points in self.worldXYs. unless added in child classes, this is the only call to this method.
         #       i.e. by default, self.worldXYs only holds the values when the node was initialized.
@@ -94,8 +77,16 @@ class BaseNode(object):
         """
         assert self._spi_data['control'].shape == (self._spi_controlSize,), "The control array does not match the size defined during construction."
         
-        return self._spi_data
-    
+        if self.report:
+            return self._spi_data
+        else:
+            #return an empty data dictionary if report is false.
+            return {
+                        'environmental': np.zeros(0),
+                        'control': np.zeros(0),
+                        'sensory': np.zeros(0)
+                    }
+                    
     def spi_set_control_features(self, control_array):
         """Set the passed control_array to data storage.
         Do not overwrite this method.
@@ -144,8 +135,8 @@ class BaseNode(object):
 class DeltaX(BaseNode):
     """The goal of this node is merely to track a moving average of DeltaX over a period.
     """
-    def __init__(self, anchorBodies, anchorPoints, shapeGroup, mavgPeriod=25, mavgPoints=100):
-        BaseNode.__init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=1)
+    def __init__(self, anchorBodies, anchorPoints, shapeGroup, mavgPeriod=25, mavgPoints=100, **kwargs):
+        super(DeltaX, self).__init__(anchorBodies, anchorPoints, shapeGroup, numAnchors=1, **kwargs)
         
         self.points = np.zeros(mavgPoints)
         
@@ -189,8 +180,8 @@ class DeltaX(BaseNode):
 class SpiMuscle(BaseNode):
     """Define the muscle node.
     """
-    def __init__(self, anchorBodies, anchorPoints, shapeGroup, restLength, stiffness, damping):
-        BaseNode.__init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=2)
+    def __init__(self, anchorBodies, anchorPoints, shapeGroup, restLength, stiffness, damping, **kwargs):
+        super(SpiMuscle, self).__init__(anchorBodies, anchorPoints, shapeGroup, numAnchors=2, **kwargs)
         
         self.originalLength = restLength
     
@@ -225,7 +216,7 @@ class SpiMuscle(BaseNode):
 
 class BalanceNode(BaseNode):
     def __init__(self, anchorBodies, anchorPoints, shapeGroup):
-        BaseNode.__init__(self, anchorBodies, anchorPoints, shapeGroup, numAnchors=1)
+        super(BalanceNode, self).__init__(anchorBodies, anchorPoints, shapeGroup, numAnchors=1)
         
         #store original anchorBody angle.
         self.origAnchorAngle = self.anchorBodies[0].angle
@@ -271,4 +262,4 @@ class BalanceNode(BaseNode):
 
 
 def node_dict():
-    return {"balance": BalanceNode, "deltax": DeltaX}
+    return {"balance": BalanceNode, "deltax": DeltaX, "muscle": SpiMuscle}

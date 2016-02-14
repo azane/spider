@@ -6,9 +6,6 @@ from pymunk import Vec2d
 from spider_nodes import node_dict
 lib_nodes = node_dict() #get dictionary of node classes.
 
-#the class inheriting pymunk.DampedSpring, adding a the method spi_get_info() for common reference to nodes.
-from spider_nodes import SpiMuscle
-
 #temporary test lists for spider physiology #just using lists here because we do it once per runtime, and it's not intensive enough to warrant numpy
 #TODO in the future, the spider physiology model will be gathered from files.
 testBones = [
@@ -25,6 +22,8 @@ testBones = [
                         [4, [25, -30]]
             ]
 
+#NOTE: even though muscles can be implemented as nodes, it makes sense to separate their specification like this to aid construction
+#       eventually, the two might be integrated.
 testMuscles = [
                         #[(sourceboneSegIndex, 0-1fractionDownSegment), (endBoneSeg, 0-1fractoinDownSeg), boolcontrollable] TODO add an elasticity modifier
                         #   the starting resting length will be derived from the bone structure with the bones resting in the middle.
@@ -48,10 +47,12 @@ testMuscles = [
         #in the bone gen loop? what if we make this a dict? and each bone end can have no more than one node attached?
         #like this testNodes = { -1: "balance", 0:"mouth", 1:"digestor" }
         #that would fix potential visualization problems with multiple nodes attached too close together.
+#TODO node specifications should allow nodes to attach to other nodes, not just bones.
+#FIXME node specs should allow multiple anchor points.
 testNodes = [
                 #[bone index at the end of which the node will be, "the type", {kwargs}] #FIXME kwargs should probably be generalized a little more?
                 [0, "balance", {}], #the balance node
-                [0, "deltax", {"mavgPeriod":450, "mavgPoints":225, "environment":False, "sensor":True}] #the velocity tracking node
+                [0, "deltax", {"mavgPeriod":450, "mavgPoints":225}] #the velocity tracking node
             ]
 
 class SpiderPhysiology(object):
@@ -68,43 +69,36 @@ class SpiderPhysiology(object):
         
         
         
-        #the below are for data exchange reference.
-        #self.nodes contains full node objects
-        #self.muscles contains full muscle objects
-        #TODO merge these two lists.
-        self.nodes = [] #these do special things, defined in spider_nodes.py
-        self.muscles = []
+        #NOTE: muscles are nodes.
+        #this list contains all the node objects that are a part of the spider.
+        self.nodes = []
         
-        #get physiological instructions
-        #   include testBool (as opposed to setting defaults) so that one doesn't accidentally end up using a test skeletal array.
+        #the 'dp_' prefix stands for 'draw' and 'physics'. these are lists of pymunk objects,
+        #       not node objects, that the nodes return for drawing and physics.
+        #include testBool (as opposed to setting defaults) so that one doesn't accidentally end up using a test skeletal array.
         #FIXME I think the physics and drawing reference lists need to be seperate. we don't need to draw all the joints, por ejemplo,
                 #but it is needed that they are added to the space and calculated into the physics environment.
         if testBool:
-            self.dp_bones, self.dp_muscles, self.dp_nodes = self.genAnatomy(testBones, testMuscles, testNodes)
+            self.dp_bones, self.dp_nodes = self.genAnatomy(testBones, testMuscles, testNodes)
         else:
             if not bonesArray or not musclesArray or not nodesArray:
                 raise ValueError("testBool is False, so bonesArray, musclesArray and nodesArray must be defined.")
-            self.dp_bones, self.dp_muscles, self.dp_nodes = self.genAnatomy(bonesArray, musclesArray, nodesArray)
+            self.dp_bones, self.dp_nodes = self.genAnatomy(bonesArray, musclesArray, nodesArray)
         
     def draw_these(self):
         
         l = []
         
         l.extend(self.dp_bones)
-        l.extend(self.dp_muscles)
-        l.extend(self.dp_nodes) #maybe we don't need to draw the nodes though? maybe only draw world altering nodes? but not mere sensory nodes?
-                                #           add an option for this in the node specs?
+        l.extend(self.dp_nodes)
         
         return l
         
     def apply_to_space(self, space):
-        
         #add pymunk objects to the physics space.
         
         space.add(*self.dp_bones)
-        space.add(*self.dp_muscles)
         space.add(*self.dp_nodes)
-        #add muscles, joints, etc.
         
     def genAnatomy(self, bonesArray, musclesArray, nodesArray):
         
@@ -117,9 +111,11 @@ class SpiderPhysiology(object):
                     #                                               {'sX':sX, 'sY':sY, 'eX':eX, 'eY':eY, 'shape':shape, 'body':body, 'l':l}
                     #                                           }
                     #                                        ]
-        bones = []
+        dp_bones = []
         
-        #this will need to be different for each spider.
+        #FIXME this will need to be different for each spider. it prevents self-collision.
+        #       but maybe we don't want to prevent self-collision of some parts?
+        #      anyway, it will need to be incremented by the worlds file.
         shapeGroup = 1
         
         #draw center circle
@@ -131,7 +127,8 @@ class SpiderPhysiology(object):
         cShape.friction = 0
         cShape.group = shapeGroup
         
-        bones.extend([cBody, cShape])
+        #start list with the center circle.
+        dp_bones.extend([cBody, cShape])
         
         for i, b in enumerate(bonesArray):
             
@@ -175,14 +172,14 @@ class SpiderPhysiology(object):
             else:
                 joint = pymunk.PivotJoint(segs[b[0]]['body'], body, (segs[b[0]]['l'],0), (0,0))
                 
-            bones.extend((body, shape, joint))
+            dp_bones.extend((body, shape, joint))
             
             #store start/end point info
             segs.append({'sX':sX, 'sY':sY, 'eX':eX, 'eY':eY, 'shape':shape, 'body':body, 'l':l})
             #print "segs: " + str(segs)
             
        
-        muscles = [] #list of muscles/non skeletal constraints
+        dp_nodes = [] #list of nodes #remember muscles are nodes.
         for i, m in enumerate(musclesArray):
             
             fBI = m[0][0] #first bone index
@@ -216,23 +213,22 @@ class SpiderPhysiology(object):
             print "f_point: " + str(f_point)
             print "s_point: " + str(s_point)
             
+            muscle = lib_nodes['muscle'](
+                                            anchorBodies=[segs[fBI]['body'], segs[sBI]['body']],
+                                            anchorPoints=[(fBRatio*segs[fBI]['l'], 0), (sBRatio*segs[sBI]['l'], 0)],
+                                            shapeGroup=shapeGroup,
+                                            restLength=restingLength,
+                                            stiffness=stiffness,
+                                            damping=damping,
+                                            report=m[2]  # set whether this muscle will be considered in data collection.
+                                        )
             
-            muscle = SpiMuscle(a=segs[fBI]['body'], b=segs[sBI]['body'],
-                                anchr1=(fBRatio*segs[fBI]['l'], 0), anchr2=(sBRatio*segs[sBI]['l'], 0),
-                                restLength=restingLength, stiffness=stiffness, damping=damping,
-                                environment=m[2], spi_originalLength=restingLength)
-            #muscle = pymunk.PinJoint(segs[fBI]['body'], segs[sBI]['body'], f_point, s_point)
-            #give muscle another property, spi_prefixed.
-            
-            muscle.environment = m[2] #set whether or not this muscle will be considered in data collection.
-            
-            self.muscles.append(muscle) #append to muscles control list and potential data collection list.
+            self.nodes.append(muscle) #append to node object list.
             
             mels = muscle.spi_node_elements()
             assert type(mels)==list, "Node.spi_node_elements must return a list."
-            muscles.extend(mels) #extend elements for drawing.
+            dp_nodes.extend(mels) #extend elements for drawing.
         
-        nodes = []
         for i, n in enumerate(nodesArray):
             
             if n[0] == -1:
@@ -245,13 +241,16 @@ class SpiderPhysiology(object):
             nodeClass = lib_nodes[n[1]]
             
             #pass the 3rd element of n, n[2] and expand it to kwargs. it is a dictionary containing node specific arguments
-            nodeObject = nodeClass(connBody, connAnchor, shapeGroup, **n[2])
+            #FIXME until node specs allow multiple anchors, do this.
+            connBodies = [connBody] #TEMP
+            connAnchors = [connAnchor] #TEMP
+            nodeObject = nodeClass(connBodies, connAnchors, shapeGroup, **n[2])
             
             nels = nodeObject.spi_node_elements()
             assert type(nels)==list, "Node.spi_node_elements must return a list."
-            nodes.extend(nels)
+            dp_nodes.extend(nels)
             
             self.nodes.append(nodeObject)
         
-        return bones, muscles, nodes
+        return dp_bones, dp_nodes
             
