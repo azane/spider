@@ -54,24 +54,28 @@ class BaseNode(object):
         #   mangle the cts_data sizes to prevent post-initialization alterations.
         #FIXME TODO edb18290hfhd what about passing **kwargs to _build_node() so that class attributes don't have to be defined above the call to super init?
         #               and won't have to be defined as attributes at all?
-        #FIXME TODO dkgbi21938th there needs to be a way to set the starting values, at least of the control feature array.
-        #               it may be better to forego this 'size' model, and have the sizes be inferred from the starting values,
-        #                as they are returned from _build_node
-        self._node_elements, self.__controlSize, self.__environmentalSize, self.__sensorySize = self._build_node()
+        self._node_elements, controlDefault, environmentalDefault, sensoryDefault = self._build_node()
         assert type(self._node_elements) is list, "_build_node must return a list as the first return value."
-        assert type(self.__controlSize) is int, "_build_node must return an int as the second return value: the control array size."
-        assert type(self.__environmentalSize) is int, "_build_node must return an int as the third return value: the environmental array size."
-        assert type(self.__sensorySize) is int, "_build_node must return an int as the fourth return value: the sensory array size."
         
         #initialize control feature array size.
         #   control size must be defined during construction.
         #       this size is verified on every set and retrieve to guarantee that it does not change after construction.
         #   environmental and sensory should be set in step, but because the spider only reads these, the spider can just infer the size on retrieval.
-        self._cts_data = {
-                            'control': np.zeros(self.__controlSize),
-                            'environmental': np.zeros(self.__environmentalSize),
-                            'sensory': np.zeros(self.__sensorySize)
-                        }
+        try:
+            self._cts_data = {
+                                'control': np.array(controlDefault, dtype=np.dtype('float64')),
+                                'environmental': np.array(environmentalDefault, dtype=np.dtype('float64')),
+                                'sensory': np.array(sensoryDefault, dtype=np.dtype('float64'))
+                            }
+        except ValueError:
+            raise ValueError("Defaults returned from _build_node must be array_like and convertible to float.")
+        
+        #set mangled size values to sizes from _build_node, this will ensure that step is consistent with what was defined in self._build_node
+        self.__controlSize = self._cts_data['control'].size
+        self.__environmentalSize = self._cts_data['environmental'].size
+        self.__sensorySize = self._cts_data['sensory'].size
+        
+        self._verify_cts_data()
         
     def _update_worldXYs(self):
         """Return worldX and worldY of the anchorBodies and anchor points..
@@ -80,21 +84,15 @@ class BaseNode(object):
         
         self.worldXYs = [ab.local_to_world(self.anchorPoints[i]) for i, ab in enumerate(self.anchorBodies)]
     
-    def get_data(self):
-        """Return the data dictionary.
-        Do not overwrite this method.
-        """
-        
-        #FIXME there must be a better way to check these than checking every time the data is accessed?
-        
-        #verify stuff on the outgoing end to catch mistakes made in child classes.
-        assert self._cts_data['control'].shape == (self.__controlSize,), "The control array does not match the size defined during construction."
-        assert self._cts_data['environmental'].shape == (self.__environmentalSize,), "The control array does not match the size defined during construction."
-        assert self._cts_data['sensory'].shape == (self.__sensorySize,), "The control array does not match the size defined during construction."
+    def _verify_cts_data(self):
         
         assert type(self._cts_data['control']) is np.ndarray, "The control array must be a numpy ndarray."
         assert type(self._cts_data['environmental']) is np.ndarray, "The environmental array must be a numpy ndarray."
         assert type(self._cts_data['sensory']) is np.ndarray, "The sensory array must be a numpy ndarray."
+        
+        assert self._cts_data['control'].shape == (self.__controlSize,), "The control array does not match the size defined during construction."
+        assert self._cts_data['environmental'].shape == (self.__environmentalSize,), "The control array does not match the size defined during construction."
+        assert self._cts_data['sensory'].shape == (self.__sensorySize,), "The control array does not match the size defined during construction."
         
         #FIXME would it better to do this? or just force a flatten?
         assert self._cts_data['control'].ndim == 1, "The control array must be 1 dimensional."
@@ -105,6 +103,15 @@ class BaseNode(object):
         assert self._cts_data['control'].dtype is np.dtype('float64'), "The control array dtype must be float64"
         assert self._cts_data['environmental'].dtype is np.dtype('float64'), "The environmental array dtype must be float64"
         assert self._cts_data['sensory'].dtype is np.dtype('float64'), "The sensory array dtype must be float64"
+        
+    def get_data(self):
+        """Return the data dictionary.
+        Do not overwrite this method.
+        """
+        
+        #FIXME there must be a better way to check these than checking every time the data is accessed?
+        #verify stuff on the outgoing end to catch mistakes made in child classes.
+        self._verify_cts_data()
         
         if self.__report:
             return self._cts_data
@@ -121,7 +128,10 @@ class BaseNode(object):
         Do not overwrite this method.
         """
         #verify incoming
-        assert type(control_array) is np.ndarray, "The input control array must be a numpy array."
+        try:
+            control_array = np.array(control_array, dtype=np.dtype('float64'))
+        except ValueError:
+            raise ValueError("The input control array must be array like and convertible to float64.")
         assert control_array.shape == (self.__controlSize,), "The input control array does not match the size defined during construction."
         assert control_array.dtype is np.dtype('float64'), "The input control array dtype must be float64."
         
@@ -145,17 +155,18 @@ class BaseNode(object):
     def _build_node(self):
         """This method should be overwritten to, in this order,
              1. return a list of individual node elements
-             2. return the size of the control feature array
-             3. return the size of the environmental feature array
-             4. return the size of the sensory feature array
+             #      the below defaults must be array_like
+             2. return the default of the control feature array
+             3. return the default of the environmental feature array
+             4. return the default of the sensory feature array
         This requirement is to force new nodes to be very explicit about the sizes of their data arrays.
         Overwrite this method.
         """
         raise NotImplementedError("'_build_node' must be implemented in child classes."+\
                                     " It must build and return a list of pymunk elements for drawing and physics,"+\
-                                        " and ints defining the sizes of the control, environmental, and sensory features, in that order.")
+                                        " and defaults defining the control, environmental, and sensory features, in that order.")
         #e.g.
-        #return [pymunkThingy], numControlFeatures, numEnvironmentalFeatures, numSensoryFeatures
+        #return [pymunkThingy], [controlDefault], [environmentalDefault], [sensoryDefault]
         
     def step(self, dt):
         """This method should be overwritten to
@@ -185,8 +196,8 @@ class DeltaX(BaseNode):
         
     
     def _build_node(self):
-        #this node has nothing that needs drawn or is involved in physics. it has 1 sensory feature.
-        return [], 0, 0, 1
+        #return no elements. return the sensory feature default.
+        return [], [], [], [0]
         
     def step(self, dt):
         """Calculates moving average and sets updates data dictionary.
@@ -241,12 +252,8 @@ class SpiMuscle(BaseNode):
                                             #can use original length because _build only gets called on init.
                                             rest_length=self.originalLength, stiffness=self.stiffness, damping=self.damping)
         
-        #FIXME TODO dkgbi21938th <- without this feature, the control features are all initialized to zero...
-        #                               which means all the muscles go to 0, and the spider just collapses. ; )
-        #                               also, as 20160214 implemented, the feature arrays are set to zeros after this method is called.
-        #                               so there goes the lazy workaround.
-        
-        return [self.muscle], 1, 1, 0
+        #return elements, and control and environmental defaults.
+        return [self.muscle], [0], [0], []
         
     def step(self, dt):
         """Retrieve control features and update the data dictionary.
@@ -256,14 +263,14 @@ class SpiMuscle(BaseNode):
         self._cts_data['environmental'] = np.array([self._get_length()])
         
         #set to the first/only value in the control array.
-        #TEMP dkgbi21938th <- as a workaround for this...we'll just use this is as a multiplier. : )
-        #                       this may have merit, as the spider will be using a tanh output, -1, 1
-        #                        so if the control features scaled off that range, the brain wouldn't have to scale it.
-        #                        but, i imagine that that requirement might limit flexibility down the road,
-        #                        and since the brain can/should be able to handle that kind of scaling...it should.
-        #                        although, it does make sense to have '0' be the middle ground?
-        #                        ...we could do both? have the brain be able to handle scaling, but have control features scale from (-1,1)?
-        #                        perhaps it does really make sense for this node in particular. but for others, maybe not. so both it is!?
+        #TODO gjdkd129287 should the step function/set control function scale values from a required range?
+        #       as the spider will be using a tanh output, -1, 1
+        #       so if the control features scaled off that range, the brain wouldn't have to scale it.
+        #       but, i imagine that that requirement might limit flexibility down the road,
+        #       and since the brain can/should be able to handle that kind of scaling...it should.
+        #       although, it does make sense to have '0' be the middle ground?
+        #       ...we could do both? have the brain be able to handle scaling, but have control features scale from (-1,1)?
+        #       perhaps it does really make sense for this node in particular. but for others, maybe not. so both it is!?
         self.muscle.rest_length = (self._cts_data['control'][0] + 1)*self.originalLength
         
 
@@ -301,8 +308,8 @@ class BalanceNode(BaseNode):
         self.last = self._get_balance() #the last balance.
         self.deltaOverDT = 0 #start slope at 0
         
-        #return element list and control array size.
-        return [self.segBody, segShape, segJoint], 0, 1, 0
+        #return element list and environmental array default.
+        return [self.segBody, segShape, segJoint], [], [0], []
     
     def step(self, dt):
         current = self._get_balance()

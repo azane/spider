@@ -152,15 +152,15 @@ class SpiderPhysiology(object):
             #set mass relative to bone length
             mass = l/10
             
-            print "points: " + str(points)
-            print "mass: " + str(mass)
-            print "body.position: " + str((sX+self.x, sY+self.y)) 
+            #print "points: " + str(points)
+            #print "mass: " + str(mass)
+            #print "body.position: " + str((sX+self.x, sY+self.y)) 
             
             moment = pymunk.moment_for_poly(mass, points, (0,0))
             body = pymunk.Body(mass, moment) #set body
             
             body.angle = numpy.arctan2(sY-eY, sX-eX) + 3.14#* 180 / math.pi
-            print "body.angle: " + str(body.angle)
+            #print "body.angle: " + str(body.angle)
             body.position = Vec2d(sX + self.x, sY + self.y) #set the body position relative to the center plus the center.
             
             shape = pymunk.Poly(body, points, (0,0))
@@ -209,9 +209,9 @@ class SpiderPhysiology(object):
             s_point = s_sVec + (s_nVec*sBRatio*segs[sBI]['l'])
             
             restingLength = f_point.get_distance(s_point)
-            print "restingLength: " + str(restingLength)
-            print "f_point: " + str(f_point)
-            print "s_point: " + str(s_point)
+            #print "restingLength: " + str(restingLength)
+            #print "f_point: " + str(f_point)
+            #print "s_point: " + str(s_point)
             
             muscle = lib_nodes['muscle'](
                                             anchorBodies=[segs[fBI]['body'], segs[sBI]['body']],

@@ -168,6 +168,7 @@ class SpiderBrain(object):
         self.y_data[0:self.lookBack] *= np.expand_dims(self.y_timeSeries[0], 0)
     
     def data_to_npz(self, dest):
-        
+        """Writes an npz file holding data
+        """
         np.savez(dest, x=self.x_data, y=self.y_data)
     

@@ -103,8 +103,8 @@ class ConveyorTest(pymunk.Space):
         return l
         
     def spi_control(self):
-        #FIXME this is not how control should be implemented...it's temporary until a better framework is developed.
-        #FIXME that framework should probably go through the spider_brain first.
+        #TEMP this is not how control should be implemented...it's temporary, for data collection and evaluation, until a better framework is developed.
+        #TODO that framework should go through the spider_brain first.
         
         m2 = self.spi_spider.nodes[2]
         #m1 = self.spi_spider.muscles[1]
@@ -120,13 +120,14 @@ class ConveyorTest(pymunk.Space):
         #    m2.set_control_features(np.array([0.]))
         if self.spi_keys[key.J]:
             #get data, and add to it, but tanh it and divide by 2 to keep within -.5,.5
+            #also, make additions be random so we get a good spread on the data.
             data = m2.get_data()
-            r = np.abs(np.random.normal(0,0.4))
+            r = np.random.uniform(0.1)
             m2.set_control_features(np.tanh(data['control'] - r)/2.)
             #NOTE: along these lines...should nodes be responsible for limiting their control features? probably yes.
         elif self.spi_keys[key.L]:
             data = m2.get_data()
-            r = np.abs(np.random.normal(0,0.4))
+            r = np.random.uniform(0.1)
             m2.set_control_features(np.tanh(data['control'] + r)/2.)
             
         if self.spi_keys[key.SPACE]:
