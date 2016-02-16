@@ -35,7 +35,7 @@ def graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sb
     if (yLow is not None) and (yHigh is not None):
         #TODO allow the output to be culled by only high or only low
         #exclude points outside of low/high range
-        x, y = cull_range(x, y, yLow, yHigh)
+        x, y = cull_range(x, y, yLow, yHigh, i=yCol)
     
     #get set number of points.
     if x.shape[0] > numPoints:

@@ -452,6 +452,7 @@ class GaussianMixtureModel(object):
             #compute softmax so that the mixing coefficients sum to 1 across x.
             mix = tf.nn.softmax(mixRaw)
             
+            
         with tf.name_scope('massage_var') as scope:
             
             #FIXME jhd838891hdjdlsl set var to 1 to see if it's causing the problem.
@@ -606,13 +607,13 @@ class GaussianMixtureModel(object):
             #   to modify the construction of these gradients,
             #   simply modify self._calc_wb_gradients_from_tf_activations
             custom_train_step = [
-                                    rd['b1'].assign_sub(rd['calc_agg_grad_b1']),
-                                    rd['b2'].assign_sub(rd['calc_agg_grad_b2']),
-                                    rd['b3'].assign_sub(rd['calc_agg_grad_b3']),
+                                    rd['b1'].assign_sub(rd['calc_agg_grad_b1'] * self.learningRate),
+                                    rd['b2'].assign_sub(rd['calc_agg_grad_b2'] * self.learningRate),
+                                    rd['b3'].assign_sub(rd['calc_agg_grad_b3'] * self.learningRate),
                                     
-                                    rd['w1'].assign_sub(rd['calc_agg_grad_w1']),
-                                    rd['w2'].assign_sub(rd['calc_agg_grad_w2']),
-                                    rd['w3'].assign_sub(rd['calc_agg_grad_w3'])
+                                    rd['w1'].assign_sub(rd['calc_agg_grad_w1'] * self.learningRate),
+                                    rd['w2'].assign_sub(rd['calc_agg_grad_w2'] * self.learningRate),
+                                    rd['w3'].assign_sub(rd['calc_agg_grad_w3'] * self.learningRate)
                                 ]
         
         sess = tf.Session()
@@ -743,9 +744,9 @@ class GaussianMixtureModel(object):
         
         
         #the bias gradients are the activation gradients. multiply by the learning rate first.
-        rd['calc_grad_b1'] = rd['grad_lay1'] * self.learningRate
-        rd['calc_grad_b2'] = rd['grad_lay2'] * self.learningRate
-        rd['calc_grad_b3'] = rd['grad_netOut'] * self.learningRate
+        rd['calc_grad_b1'] = rd['grad_lay1']# * self.learningRate
+        rd['calc_grad_b2'] = rd['grad_lay2']# * self.learningRate
+        rd['calc_grad_b3'] = rd['grad_netOut']# * self.learningRate
         
         #the weight gradients are the previous layer's activations multiplied by the error gradient in the output.
         #change so that ins.shape == (s,inSize,1) and outs.shape == (s,1,outSize)
@@ -757,9 +758,9 @@ class GaussianMixtureModel(object):
         grad_lay2_ = tf.expand_dims(rd['grad_lay2'], 1)
         grad_netOut_ = tf.expand_dims(rd['grad_netOut'], 1)
         
-        rd['calc_grad_w1'] = netIn_ * grad_lay1_ * self.learningRate
-        rd['calc_grad_w2'] = lay1_ * grad_lay2_ * self.learningRate
-        rd['calc_grad_w3'] = lay2_ * grad_netOut_ * self.learningRate
+        rd['calc_grad_w1'] = netIn_ * grad_lay1_# * self.learningRate
+        rd['calc_grad_w2'] = lay1_ * grad_lay2_# * self.learningRate
+        rd['calc_grad_w3'] = lay2_ * grad_netOut_# * self.learningRate
         
         #aggregate over samples with the average!
         agg_func = tf.reduce_mean
@@ -783,12 +784,18 @@ class GaussianMixtureModel(object):
                                             ])
         nodeList.append(p_loss)
         
+        #variances over iterations
+        p_vars = tdb.plot_op(viz.watch_reduced_variances, inputs=[
+                                                self.graph.as_graph_element(self.refDict['v'])
+                                            ])
+        nodeList.append(p_vars)
+        
         #---<W1>---
         #w1 over iterations
         p_watch_w1 = tdb.plot_op(viz.watch_weights, inputs=[
                                                 self.graph.as_graph_element(self.refDict['w1'])
                                             ])
-        nodeList.append(p_watch_w1)
+        #nodeList.append(p_watch_w1)
         
         #w1 as squares
         p_square_w1 = tdb.plot_op(viz.weight_squares, inputs=[
@@ -800,7 +807,7 @@ class GaussianMixtureModel(object):
         p_hist_w1 = tdb.plot_op(viz.weight_hist, inputs=[
                                                 self.graph.as_graph_element(self.refDict['w1'])
                                             ])
-        nodeList.append(p_hist_w1)
+        #nodeList.append(p_hist_w1)
         #---</W1>---
         
         #---<B1>---
@@ -808,7 +815,7 @@ class GaussianMixtureModel(object):
         p_watch_b1 = tdb.plot_op(viz.watch_biases, inputs=[
                                                 self.graph.as_graph_element(self.refDict['b1'])
                                             ])
-        nodeList.append(p_watch_b1)
+        #nodeList.append(p_watch_b1)
         #---</B1>---
         
         #---<W2>---
@@ -816,7 +823,7 @@ class GaussianMixtureModel(object):
         p_watch_w2 = tdb.plot_op(viz.watch_weights, inputs=[
                                                 self.graph.as_graph_element(self.refDict['w2'])
                                             ])
-        nodeList.append(p_watch_w2)
+        #nodeList.append(p_watch_w2)
         
         #w2 as squares
         p_square_w2 = tdb.plot_op(viz.weight_squares, inputs=[
@@ -828,7 +835,7 @@ class GaussianMixtureModel(object):
         p_hist_w2 = tdb.plot_op(viz.weight_hist, inputs=[
                                                 self.graph.as_graph_element(self.refDict['w2'])
                                             ])
-        nodeList.append(p_hist_w2)
+        #nodeList.append(p_hist_w2)
         #---</W2>---
         
         #---<B2>---
@@ -836,7 +843,7 @@ class GaussianMixtureModel(object):
         p_watch_b2 = tdb.plot_op(viz.watch_biases, inputs=[
                                                 self.graph.as_graph_element(self.refDict['b2'])
                                             ])
-        nodeList.append(p_watch_b2)
+        #nodeList.append(p_watch_b2)
         #---</B2>---
         
         #---<W3>---
@@ -844,7 +851,7 @@ class GaussianMixtureModel(object):
         p_watch_w3 = tdb.plot_op(viz.watch_weights, inputs=[
                                                 self.graph.as_graph_element(self.refDict['w3'])
                                             ])
-        nodeList.append(p_watch_w3)
+        #nodeList.append(p_watch_w3)
         
         #w3 as squares
         p_square_w3 = tdb.plot_op(viz.weight_squares, inputs=[
@@ -856,7 +863,7 @@ class GaussianMixtureModel(object):
         p_hist_w3 = tdb.plot_op(viz.weight_hist, inputs=[
                                                 self.graph.as_graph_element(self.refDict['w3'])
                                             ])
-        nodeList.append(p_hist_w3)
+        #nodeList.append(p_hist_w3)
         #---</W3>---
         
         #---<B3>---
@@ -864,7 +871,7 @@ class GaussianMixtureModel(object):
         p_watch_b3 = tdb.plot_op(viz.watch_biases, inputs=[
                                                 self.graph.as_graph_element(self.refDict['b3'])
                                             ])
-        nodeList.append(p_watch_b3)
+        #nodeList.append(p_watch_b3)
         #---</B3>---
         
         self.refDict['tdb_nodes'] = nodeList

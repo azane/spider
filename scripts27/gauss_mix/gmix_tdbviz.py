@@ -11,7 +11,12 @@ def watch1graph(ctx, y, yLabel='', title=''):
         ctx.history = []
     
     ctx.history.append(y)
-    plt.plot(ctx.history)
+    #FIXME 10295ukgslkey to display ctx.history when it fails.
+    try:
+        plt.plot(ctx.history)
+    except TypeError:
+        raise EnvironmentError("You cannot run tfdebugger reports when inline matplotlib graphs have interactivity still enabled." +\
+                                    "Hit the blue off button in the top right corner of active matplotlib graphs.")
     
     plt.xlabel('Iterations')
     plt.ylabel(yLabel)
@@ -73,6 +78,11 @@ def watch_weights(ctx, w):
 
 def watch_biases(ctx, b):
     watch1graph(ctx, b, yLabel='Bias', title='Bias Over Iterations')
+
+def watch_reduced_variances(ctx, v):
+    v = np.squeeze(np.mean(v, axis=0))
+    watch1graph(ctx, v, yLabel='Variance', title='Variance Means Over Iterations')
+
 
 #----</CTX functions>----
 
