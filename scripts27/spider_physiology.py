@@ -9,7 +9,7 @@ lib_nodes = node_dict() #get dictionary of node classes.
 #temporary test lists for spider physiology #just using lists here because we do it once per runtime, and it's not intensive enough to warrant numpy
 #TODO in the future, the spider physiology model will be gathered from files.
 testBones = [
-                        #[index, (relX, relY)|index, degreeRange]. #FIXME TODO bones attaching to bones is currently unimplemented.
+                        #[index, (relX, relY)|index, degreeRange]. #FIXME TODO bones attaching to bones at their endpoint is currently unimplemented.
                         #   this bone segment will go from index (-1 is the center), to the endpoint relative to the starting point,
                         #       for which it may eventually be allowed to be the endpoint of a previously indexed segment.
                         #indices must be less than its own.

@@ -1,5 +1,3 @@
-#TODO someday, a better version of this should be integrated with the spider system, so we can see graphs in mostly real time.
-
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.animation as animation
@@ -13,79 +11,72 @@ and should have two arrays. x.shape == (s,inputdimensions) and y.shape == (s,out
 
 terminal e.g.: frameworkpython thisfile.py data.npz"""
 
-#TODO create an "if main" clause so this can be used and imported.
+def cull_range(x, y, low, high, i=-1):
+    """takes two 2d arrays, but only culls by the last y column."""
+    indices = np.where((y[:,i] >= low) & (y[:,i] <= high))
+    return x[indices], y[indices]
 
-def scale(x, index, low, high):
-    #return an array after discarding points outside of the range.
-    return x[:,(x[index]>low) & (x[index]<high)]#select column indices within the range.
-
-def init4d(x, y):
-    assert y.ndim == 1
+def graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sbpltLoc=111, numPoints=1000):
+    """Takes two 2d arrays, but only graphs the 
+        3 columns of x, and 1 column of y."""
+    #---<Assertions>---
+    assert x.shape[0] == y.shape[0], "x and y have a different number of points!" #check sample size.
+    
+    assert y.ndim == 2
+    assert y.shape[1] >= 1  # at least one y column
+    
     assert x.ndim == 2
-    #assert x.shape[0] == 3
+    assert len(xCols) == 3
+    assert x.shape[1] >= len(xCols)  # at least xCols x columns
+    #---</Assertions>---
     
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d') #create subplot in figure.
+    #---<Culling>---
+    #cull by range first, just in case this gets the numPoints down.
+    if (yLow is not None) and (yHigh is not None):
+        #TODO allow the output to be culled by only high or only low
+        #exclude points outside of low/high range
+        x, y = cull_range(x, y, yLow, yHigh)
+    
+    #get set number of points.
+    if x.shape[0] > numPoints:
+        randRows = np.random.randint(x.shape[0],size=numPoints)
+        x = x[randRows]
+        y = y[randRows]
+    #---</Culling>---
+    
+    #---<Plotting>---
+    if fig is None:
+        fig = plt.figure()
+    ax = fig.add_subplot(sbpltLoc, projection='3d') #create subplot in figure.
     
     #set the color map to the output dimension.
-    scatPlot = ax.scatter(x[0], x[1], x[-1], c=y) #create plot
+    scatPlot = ax.scatter(
+                            x[:,xCols[0]],
+                            x[:,xCols[1]],
+                            x[:,xCols[2]],
+                        c=y[:,yCol]) #create plot
     
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
+    ax.set_xlabel("x1")
+    ax.set_ylabel("x2")
+    ax.set_zlabel("x3")
     
     #add colorbar label
     cb = fig.colorbar(scatPlot)
     cb.set_label("y")
+    #---</Plotting>---
     
     return fig, scatPlot
 
-def init3d(x, y):
-    assert y.ndim == 1 #exactly 1 output
-    assert x.ndim == 2 #exactly 2d
-    assert x.shape[0] == 2 #exactly 2 inputs
+
+if __name__ == '__main__':
+    #get data from npz
+    xy = np.load(sys.argv[1])
+    x = xy['x']
+    try:
+        y = xy['y']
+    except KeyError:
+        y = xy['t']
+        
+    graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sbpltLoc=111, numPoints=1000)
     
-    fig = plt.figure() #init figure
-    ax = fig.add_subplot(111, projection='3d') #create subplot in figure.
-    
-    #set the color map to the output dimension.
-    #print selForN
-    scatPlot = ax.scatter(x[0], x[1], y, c=y) #create plot
-    
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    
-    #add colorbar label
-    cb = fig.colorbar(scatPlot)
-    cb.set_label("y")
-    
-    return fig, scatPlot
-
-def init2d(x,y):
-    assert x.ndim == 1
-    assert x.shape == y.shape
-    
-    return plt.scatter(x, y)#, s=area, c=colors, alpha=0.5)
-
-xy = np.load(sys.argv[1]) #gather 3d data split into x and y from npz passed from command line.
-x = xy['x']
-y = xy['y']
-
-print x.shape, y.shape
-
-assert x.shape[0] == y.shape[0], "x and y have a different number of points!" #check sample size.
-
-
-#cull data to a set number of points.
-lim = 1500
-if x.shape[0] > lim:
-    randRows = np.random.randint(x.shape[0],size=1500)
-    x = x[randRows]#, :]
-    y = y[randRows]#, :]
-
-for t in range(y.shape[1]):
-    #x is only transposed so x.shape == (inputdimensions, s), while each y output is taken so y.shape == (s,)
-    init4d(np.squeeze(x.transpose()), np.squeeze(y[:,t])) #select single output, transpose x to match now that y is a 1d row of shape (s,)
-
-plt.show()
+    plt.show()
