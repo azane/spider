@@ -65,10 +65,10 @@ class SpiderBrain(object):
         self.y_timeSeries = np.zeros((self.lookBack, yWidth))
         
         #create empty arrays using the specified data size and inferred widths.
-        #   x_data will hold control, environmental, and sensory features,
-        #       AND the time axis marking the number of timeIntervals until the reported sensor value actualized.
+        #   x_data will hold control and environmental features (+xWidth)
+        #       AND the time axis (+1) marking the number of timeIntervals until the reported sensor value actualized.
         #   y_data will only hold sensory feature values paired with x values and sensor values that are cast over time.
-        self.x_data = np.zeros((self.dataSize, xWidth+yWidth+1))
+        self.x_data = np.zeros((self.dataSize, xWidth+1))
         self.y_data = np.zeros((self.dataSize, yWidth))
     
     def step(self, dt):
@@ -86,32 +86,16 @@ class SpiderBrain(object):
         self._update_series(dt)
         self._generate_data_over_time()
     
-    def _shift_and_one(self, array, shift=1):
-        """Shift 2d array by rows and turn the recycled rows into ones.
-        """
-        assert array.ndim == 2, "The array must be 2d."
-        #because in place operations won't convert dtypes on the fly.
-        assert array.dtype is np.dtype('float64'), "The array must be float64."
+    def _shift(self, array, shift=1):
+        #FIXME 38bgkdlsien this allocates an entire copy. can't want this. need a way to roll without reallocating.
+        return np.roll(array, shift=shift, axis=0)
         
-        #FIXME 38bgkdlsien this allocates an entire copy. can't do this. need a way to roll without reallocating.
-        array = np.roll(array, shift=shift, axis=0)
-        
-        #prep for sneaky-mom in-place value setting.
-        #   NOTE: this method of assignment acts in place for numpy arrays.
-        #   make entire shift equal zero
-        array[0:shift] *= 0.
-        #   make entire shift equal one
-        array[0:shift] += 1.
-        
-        #FIXME 38bgkdlsien <- when this is fixed, we shouldn't need to return anything.
-        return array
-    
     def _update_series(self, dt):
         """Updates both series with current time step data.
         """
         #---<Prep Series>---
-        self.x_timeSeries = self._shift_and_one(self.x_timeSeries)
-        self.y_timeSeries = self._shift_and_one(self.y_timeSeries)
+        self.x_timeSeries = self._shift(self.x_timeSeries)
+        self.y_timeSeries = self._shift(self.y_timeSeries)
         #---</Prep Series>---
         
         #---<Update Series[0]>---
@@ -126,17 +110,16 @@ class SpiderBrain(object):
             e = cts_data['environmental'].size  # environmental features
             s = cts_data['sensory'].size  # sensory features
             
-            #NOTE: the series[0] now equals 1, multiplying by an array effectively assigns that array, in place.
             #set control feature values
-            self.x_timeSeries[0,x_cLoc:x_cLoc+c] *= cts_data['control']
+            self.x_timeSeries[0,x_cLoc:x_cLoc+c] = cts_data['control']
             x_cLoc += c
             
             #set environmental feature values
-            self.x_timeSeries[0,x_cLoc:x_cLoc+e] *= cts_data['environmental']
+            self.x_timeSeries[0,x_cLoc:x_cLoc+e] = cts_data['environmental']
             x_cLoc += e
             
             #set sensory feature values
-            self.y_timeSeries[0,y_cLoc:y_cLoc+s] *= cts_data['sensory']
+            self.y_timeSeries[0,y_cLoc:y_cLoc+s] = cts_data['sensory']
             y_cLoc += s
         #---</Update Series[0]>---
     
@@ -149,8 +132,8 @@ class SpiderBrain(object):
         """
         #---<Prep data store>---
         #shift out old data, and turn the first lookBack rows into 1s
-        self.x_data = self._shift_and_one(self.x_data, shift=self.lookBack)
-        self.y_data = self._shift_and_one(self.y_data, shift=self.lookBack)
+        self.x_data = self._shift(self.x_data, shift=self.lookBack)
+        self.y_data = self._shift(self.y_data, shift=self.lookBack)
         #---</Prep data store>---
         
         #collect widths
@@ -159,13 +142,12 @@ class SpiderBrain(object):
         
         #multiply the 1s in lookBack rows of x_data by the both time series arrays,
         #   i.e. assign the timeSeries array to the first lookBack rows of data, and to the xWidth column.
-        self.x_data[0:self.lookBack,0:xWidth] *= self.x_timeSeries  # assign x vals
-        self.x_data[0:self.lookBack,xWidth:xWidth+yWidth] *= self.y_timeSeries  # assign y vals
-        self.x_data[0:self.lookBack,xWidth+yWidth:xWidth+yWidth+1] *= self.lookBackColumn # assign time axis vals
+        self.x_data[0:self.lookBack,0:xWidth] = self.x_timeSeries  # assign x vals
+        self.x_data[0:self.lookBack,xWidth:xWidth+1] = self.lookBackColumn # assign time axis vals
         
         #assign the first lookBack rows of y_data to the most recent value in the y series.
         #   this requires adding a dimension to broadcast over the 1s
-        self.y_data[0:self.lookBack] *= np.expand_dims(self.y_timeSeries[0], 0)
+        self.y_data[0:self.lookBack] = np.expand_dims(self.y_timeSeries[0], 0)
     
     def data_to_npz(self, dest):
         """Writes an npz file holding data

@@ -127,14 +127,16 @@ class BaseNode(object):
         """Set the passed control_array to the data dictionary.
         Do not overwrite this method.
         """
+        #TODO write set methods for environmental and sensory? but just for private use? these would serve to verify the build function.
+        
         #verify incoming
         try:
             control_array = np.array(control_array, dtype=np.dtype('float64'))
         except ValueError:
             raise ValueError("The input control array must be array like and convertible to float64.")
         assert control_array.shape == (self.__controlSize,), "The input control array does not match the size defined during construction."
-        assert control_array.dtype is np.dtype('float64'), "The input control array dtype must be float64."
         
+        #in place mods
         self._cts_data['control'] = control_array
         
     
@@ -196,7 +198,7 @@ class DeltaX(BaseNode):
         
     
     def _build_node(self):
-        #return no elements. return the sensory feature default.
+        #return no elements for dp. return the sensory feature default.
         return [], [], [], [0]
         
     def step(self, dt):

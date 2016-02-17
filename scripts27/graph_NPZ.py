@@ -8,8 +8,9 @@ import sys
 the .npz file referenced should be...an .npz file...
 and should have two arrays. x.shape == (s,inputdimensions) and y.shape == (s,outputdimensions)
 #also must use frameworkpython on osx, this command can be set up in the .bashrc file if using a virtualenv. see matplotlib faq for details.
+the the 2nd argument should be a comma delimited list of x columns to plot
 
-terminal e.g.: frameworkpython thisfile.py data.npz"""
+terminal e.g.: frameworkpython thisfile.py data.npz -1,3,2"""
 
 def cull_range(x, y, low, high, i=-1):
     """takes two 2d arrays, but only culls by the last y column."""
@@ -19,16 +20,25 @@ def cull_range(x, y, low, high, i=-1):
 def graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sbpltLoc=111, numPoints=1000):
     """Takes two 2d arrays, but only graphs the 
         3 columns of x, and 1 column of y."""
-    #---<Assertions>---
+    #---<Error Catching>---
     assert x.shape[0] == y.shape[0], "x and y have a different number of points!" #check sample size.
     
     assert y.ndim == 2
     assert y.shape[1] >= 1  # at least one y column
     
     assert x.ndim == 2
-    assert len(xCols) == 3
-    assert x.shape[1] >= len(xCols)  # at least xCols x columns
-    #---</Assertions>---
+    assert len(xCols) == 3, "There must be 3 xColumns listed for plotting."
+    assert x.shape[1] >= len(xCols), "There aren't enough xColumns for this plotting function."
+    
+    #check indices, if it's out of range, bad!
+    assert max(xCols) < x.shape[1]
+    if min(xCols) < 0:
+        assert (min(xCols)*-1) <= x.shape[1]
+    
+    assert yCol < y.shape[1]
+    if yCol < 0:
+        assert (yCol*-1) <= y.shape[1]
+    #---</Error Catching>---
     
     #---<Culling>---
     #cull by range first, just in case this gets the numPoints down.
@@ -69,6 +79,14 @@ def graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sb
 
 
 if __name__ == '__main__':
+    
+    #verify xCols
+    xCols = sys.argv[2].split(',')
+    try:
+        xCols = [int(i) for i in xCols]
+    except ValueError:
+        raise ValueError("sys.argv[2] should be a comma delimited list of x column indices (ints) to plot.")
+    
     #get data from npz
     xy = np.load(sys.argv[1])
     x = xy['x']
@@ -76,7 +94,14 @@ if __name__ == '__main__':
         y = xy['y']
     except KeyError:
         y = xy['t']
-        
-    graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sbpltLoc=111, numPoints=1000)
+    
+    print "x.shape: " + str(x.shape)
+    print "y.shape: " + str(y.shape)
+    
+    #TODO write a function that takes y and x shapes, and returns a list of sbpltLoc's so they can all fit on one graph.
+    #       then iterate it and add subplots to the first figure. or...use subplots and figures. figs for y, subplts for xdims over 3
+    #sbpltLoc = 
+    
+    graph3x1y(x, y, xCols=xCols, yCol=-1, yLow=None, yHigh=None, fig=None, sbpltLoc=111, numPoints=1000)
     
     plt.show()
