@@ -8,6 +8,8 @@ import tdb as tdb
 
 SUMMARY_DIRECTORY = "/Users/azane/GitRepo/spider/data/gauss_mix_logs" #directory in which summary files are stored
 
+#FIXME a bit of a misnomer...i use 'v' and 'variance' for a value that is actually the standard deviation.
+
 #-----<Helper Functions>-----
 def get_xt_from_npz(npz_path, allow_pickle=False):
     """Return x and t
@@ -49,10 +51,7 @@ def tf_gaussian_likelihood(m, v, u, t):
         premix = v_norm*(tf.exp(-(tm_num/v_dem)))
         
         #mix gaussian components
-        #FIXME dkgni19dfohkjodnah9 didn't fix the flatlining problem...no difference in weight/bias gradient overload either.
-        #dkgni19dfohkjodnah9 trying something. m error gradient is wrong, so use 1 component, and don't calculate it.
-        likelihood = m*premix #disabled dkgni19dfohkjodnah9
-        #likelihood = (m/m)*premix #dkgni19dfohkjodnah9
+        likelihood = m*premix
         
     return likelihood  # tf.shape(likelihood) == (s,g,t)
 
@@ -129,24 +128,41 @@ def tf_grad_u(m, v, u, t):
 #----</Loss Gradients>-----
 
 #----<Range Normalization Functions>-----
-#TODO turn these all into one function taking the destination range
-#       it's a BIT redundant. a bit.
+#TODO FIXME these are basically the same functions, cut two, or give a convenience function to get the midpoint of rBot/rTop
 def to_zeroToOne(vals, rBot, rTop):
     return (vals-rBot)/(rTop-rBot)
 def from_zeroToOne(vals, rBot, rTop):
     return (vals*(rTop-rBot))+rBot
+def to_one_from_range(vals, rangeCenter=0., rangeSize=2.):
+    """Normalize to range [0,1] from range.
+        Calling this with float values is quite important."""
+    vals -= rangeCenter  # center 0
+    vals += rangeSize/2  # bottom 0
+    vals /= rangeSize  # scale to 1
+    
+    return vals
+    
+def from_one_to_range(vals, rangeCenter=0., rangeSize=2.):
+    """Expand from range [0,1] to range.
+        Calling this with float values is quite important."""
+    vals *= rangeSize  # expand to rangeSize
+    vals += rangeCenter  # shift to top of rangeCenter
+    vals -= rangeSize/2  # shift down the rangeSize to center
+    
+    return vals
 
+#TODO FIXME these should be cut down to arbitrary to_range from_range functions.
 def to_tanh_output(vals, rBot, rTop):
     """Return vals normalized to tanh output, (-1,1).
     rBot and rTop must match the broadcastable to vals coming in.
     """
     zeroToOne = to_zeroToOne(vals, rBot, rTop)
-    return (zeroToOne*2.)-1.
+    return from_one_to_range(zeroToOne)
     
 def from_tanh_output(vals, rBot, rTop):
     """Return vals expanded from tanh output range (-1,1).
     """
-    zeroToOne = (vals+1.)/2.
+    zeroToOne = to_one_from_range(vals)
     return from_zeroToOne(zeroToOne, rBot, rTop)
 
 
@@ -155,13 +171,13 @@ def to_tanh_input(vals, rBot, rTop):
     rBot and rTop must match the shape of vals coming in.
     """
     zeroToOne = to_zeroToOne(vals, rBot, rTop)
-    return (zeroToOne*5.)-2.5
+    return from_one_to_range(zeroToOne, rangeSize=5)
     
     
 def from_tanh_input(vals, rBot, rTop):
     """Return vals expanded from tanh input range [-2.5, 2.5].
     """
-    zeroToOne = (vals+2.5)/5
+    zeroToOne = to_one_from_range(vals, rangeSize=5)
     return from_zeroToOne(zeroToOne, rBot, rTop)
 #----</Range Normalization Functions>-----
 
@@ -171,18 +187,19 @@ class GaussianMixtureModel(object):
     def TODOsFIXMEs():
         pass
         
-        #TODO make docstring for this class
-        #TODO throughout this project, make 't' be the variable for training targets, i.e. ideal outputs
-        #       and 'y' the variable for actual outputs.
+        #TODO we need a flag to determine if an instance gets summaries/graphs drawn for it.
         
+        #TODO make the variable naming more consistent throughout functions.
         
-        #TODO make this a class that inits graphs/sessions for each new instance. this will be required to have lots of jasons running their own graphs.
-        #       or lots of jasons calling to the same server to run their data and return their weight matrices.
-        #     we'll also need to control which instances get summaries written for them. just with a flag probs.
+    def __init__(self, x, t, x_test, t_test,
+                    inDims=None, outDims=None,
+                    inRange=None, outRange=None,
+                    numGaussianComponents=5, hiddenLayerSize=15, learningRate=0.01,
+                    buildGraph=True, debug=True):
         
-        #TODO make the variable naming more consistent throughout functions. it's confusing...slash, that may come with making it a class.
-        
-    def __init__(self, x, t, x_test, t_test, inDims=None, outDims=None, inRange=None, outRange=None, numGaussianComponents=5, hiddenLayerSize=15, learningRate=0.01):
+        #buildGraph  # flag for whether init should build the training graph.
+        self.__graphBuilt = False  # flag for whether the graph has been built.
+        self.__debug = debug  # flag for whether debug nodes should be built with the graph.
         
         self.graph = tf.Graph()
         #set this graph as default for every public function that uses tensorflow.
@@ -219,10 +236,25 @@ class GaussianMixtureModel(object):
             #this is a reference dictionary where tensorflow tensor objects are stored.
             #   it's basically employed to keep the class namespace cleaner, cz there can be looots of tensors.
             self.refDict = {}
-        
-            self._gmix_training_model()
             
-            self._tdb_nodes()
+            if buildGraph:
+                self.build_graph()
+            
+    def build_graph(self):
+        """Builds the tensorflow training graphs.
+            This can be called from outside if the init flag, 'buildGraph' is set to false.
+        """
+        #make sure the graph hasn't been built before
+        if not self.__graphBuilt:
+            with self.graph.as_default():
+                self._gmix_training_model()
+                if self.__debug:
+                    self._tdb_nodes()
+                #set flag to true, so we know the graph was built
+                self.__graphBuilt = True
+        else:
+            #TODO use warning module
+            print("WARNING: Graph has already been built. Will not build again.")
         
     def _infer_space(self, x, t):
         """Return inferred in and out dimensions
@@ -343,20 +375,32 @@ class GaussianMixtureModel(object):
         """
         i = np.random.random_integers(0, high=x.shape[0]-1, size=size)
         return x[i], t[i]
-    def _gmix_forward_model(self):
+    def spi_get_forward_model(self, rd, graph):
+        """Takes a graph and builds the forward model on that graph, take a dictionary and fill it with tensors.
+            This graph can be passed in from elsewhere (the spider), so that the spider can choose to build only the forward model for its graphs.
+            If a spider just wants the forward model and doesn't need to train the model at all (i.e. is using a web server or just doesn't need to train anymore),
+             the spider should initialize the GMM with 'buildGraph' and 'debug' set as False.
+        """
+        assert type(rd) is dict
+        assert graph is not self.graph
+        
+        with graph.as_default():
+            self._gmix_forward_model(rd)
+        
+    def _gmix_forward_model(self, rd=None):
         """Build forward model and add tensors to the dict of tensorflow tensors
             
             This method builds the forward part of the tensorflow graph and returns a dict for reference.
                 This does not build a loss function. It only builds the placeholders, ANN,
                     and shapes the ANN outputs into something useable by a loss function or a sampler.
-                    
-            'inDims' is the size of the x vector, i.e. the number of input dimensions (not array dimensions!)
-            'outDims' is the size of the t/y vector, i.e. the number of ultimate target dimensions, this differs from the output of the ANN
-            'g' is the number of gaussian components to employ
-            'hiddenLayerSize' is the size of the hidden layers of the ANN
+                This does not build the point value model used by the spider.
         """
         
-        #TODO make g and hiddenLayerSize defaults a function of data complexity? or maybe have them be learned as well.
+        #allow for another reference dictionary, in case this is being called to build on another graph.
+        if rd is None:
+            rd = self.refDict
+        else:
+            assert type(rd) is dict
         
         #TODO FIXME make naming in this function consistent with the rest of the project.
         #               change 'g' to something that does not imply it's array_like (it's an int). elsewhere, single letter variables are array_like, 
@@ -454,11 +498,6 @@ class GaussianMixtureModel(object):
             
             
         with tf.name_scope('massage_var') as scope:
-            
-            #FIXME jhd838891hdjdlsl set var to 1 to see if it's causing the problem.
-            #this doesn't make tf calculate a zero gradient? HOW!? is this being used elsewhere?
-            #   apparently there's still a way to change var that matters?
-            #varRaw = varRaw*0 #var should be 1
             #variances
             #varScale = tf.Variable(2.0) #TODO is this a good idea?
             var = tf.exp(tf.mul(varRaw, 3.0)) #keep variance positive, and relevant. this scales from tanh output (-1,1)
@@ -468,7 +507,6 @@ class GaussianMixtureModel(object):
         with tf.name_scope('massage_mean') as scope:
             #mean
             #expand to output range
-            #mean = ((.5 + (meanRaw/2)) * (eROutT-eROutB)) + eROutB #this scales from relevant tanh output (-1,1)
             mean = from_tanh_output(meanRaw, rBot=eROutB, rTop=eROutT)
             
         #summary ops
@@ -481,12 +519,11 @@ class GaussianMixtureModel(object):
         
         #FIXME this is a workaround for x retrievals that say, "fed and fetched, you suck"
         fetchX = from_tanh_input(netIn, rBot=eRInB, rTop=eRInT)
-        #do stuff so it thinks we aren't just fetching a feed. BLAGH! there's a better way.
         mid_fetchT = to_zeroToOne(fullOut_, rBot=eROutB, rTop=eROutT)
         fetchT = from_zeroToOne(mid_fetchT, rBot=eROutB, rTop=eROutT)
         
         #this section updates the instance dictionary that can be used from outside to run tensorflow output and to fill placeholders.
-        rd = self.refDict
+        #rd = self.refDict defined at the beginning, so the spider can have it fill a different dict if it only wants the forward model.
         rd['x']=fullIn
         rd['fetchX']=fetchX
         rd['t']=fullOut_
@@ -547,16 +584,13 @@ class GaussianMixtureModel(object):
             likelihood = tf_gaussian_likelihood(m, v, u, t)
             
             #sum over the likilihood of each target and gaussian component, don't reduce over samples yet.
-            #FIXME i know the gaussian components are supposed to be summed, but i'm not sure about the various targets?
+            #FIXME i know the gaussian components are supposed to be summed, but i'm not sure about the target dimensions?
             #FIXME      do i have to mix the targets like the gaussian components?
             tot_likelihood = tf.reduce_sum(likelihood, [1,2]) #sum over g and t dimensions.
             
-            """38ndksl3ihk
-            Trying something. remove the summation over the samples, and let this be aggregated over the weights in the end."""
-            #take natural log of sum, then reduce over samples, then negate for the final negative log likelihood
-            #nll = -tf.reduce_sum(tf.log(tot_likelihood)) #this reduces along the final dimension, so nll will be a scalar. #disabled: 38ndksl3ihk
+            #don't reduce over samples here, that way nothing is lost until aggregation happens for individual weights and biases.
             #add 1e-5 to prevent infs.
-            nll = -tf.log(tot_likelihood+1e-5) #38ndksl3ihk
+            nll = -tf.log(tot_likelihood+1e-5)
             
             #summary ops
             likelihood_hist = tf.histogram_summary("Post-mixed Likelihood", likelihood)
@@ -605,7 +639,7 @@ class GaussianMixtureModel(object):
             train_step = optimizer.minimize(rd['loss_nll'])
             #custom train step applies the calculated and aggregated gradients.
             #   to modify the construction of these gradients,
-            #   simply modify self._calc_wb_gradients_from_tf_activations
+            #    see modify self._calc_wb_gradients_from_tf_activations
             custom_train_step = [
                                     rd['b1'].assign_sub(rd['calc_agg_grad_b1'] * self.learningRate),
                                     rd['b2'].assign_sub(rd['calc_agg_grad_b2'] * self.learningRate),
@@ -670,7 +704,10 @@ class GaussianMixtureModel(object):
         return self.refDict
     def get_evals(self, evalStrs):
         """Return a dictionary of evaluated tensors with evalStr as keys.
-        'evalStr' contains a list of strings that act as the reference dictionary keys for the tensors to evaluate."""
+            'evalStr' contains a list of strings that act as the reference dictionary keys for the tensors to evaluate.
+        """
+        
+        assert self.__graphBuilt, "Graph not built. Build graph."
         
         with self.graph.as_default():
             #use test values as feeds.
@@ -1042,6 +1079,9 @@ class GaussianMixtureModel(object):
         self.refDict['2d_tdb_nodes'] = nodeList
     
     def train(self, iterations=1000, testBatchSize=500, trainBatchSize=1000, reportEvery=10):
+        
+        assert self.__graphBuilt, "Graph not built. Build graph."
+        
         with self.graph.as_default():
             iterations, testBatchSize, trainBatchSize = self._massage_training_arguments(iterations, testBatchSize, trainBatchSize)
             
@@ -1077,9 +1117,6 @@ class GaussianMixtureModel(object):
                     status, result = tdb.debug(evals, feed_dict=feed_dict, session=self.refDict['sess'])#, breakpoints=breakpoints)
                     
                     #self.refDict['summaryWriter'].add_summary(result[0], i) #write to summary
-                    #print("Loss at step %s: %s" % (i, result[1])) #print loss
-                    #print '-------------------------------'
-                    
                 
                 else:
                     #update feed_dict with training batch

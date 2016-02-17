@@ -1,8 +1,22 @@
 import numpy as np
 
+class SolutionExplorers(object):
+    """The base 'go between' class linking trained experiential models to the the spider's control features."""
+    
+    def __init__(self):
+        super(ExperientialModel, self).__init__()
+    def _certainty(self):
+        pass
+    def _gratification_term(self):
+        pass
+    def _sensor(self):
+        pass
+    def select_explorer(self):
+        pass
+
 class SpiderBrain(object):
     def __init__(self, physiology):
-        object.__init__(self)
+        super(SpiderBrain, self).__init__()
         
         #a SpiderPhysiology object passed in from the world so the brain can access it's body.
         self.physiology = physiology
