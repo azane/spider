@@ -1,17 +1,41 @@
 import numpy as np
 
-class SolutionExplorers(object):
+class Explorer(object):
+    def __init__(self, c_x):
+        super(Explorer, self).__init__()
+        
+        #The explorers control feature x location, this excludes environmental features
+        self._c_x = c_x
+        
+    def walk(self, stepVector):
+        try:
+            self._c_x += stepVector
+        except TypeError:
+            raise TypeError("Cannot add stepVector of type " + str(type(stepVector)) + " to explorer location np.ndarray.")
+    
+class ExplorerHQ(object):
     """The base 'go between' class linking trained experiential models to the the spider's control features."""
     
     def __init__(self):
         super(ExperientialModel, self).__init__()
+        
+        self._bestExplorer = #TODO this will store the best sensor value as the explorers are stepped.
+        
     def _certainty(self):
+        #TODO add tensorflow elements to a graph to calculate the certainty value
         pass
     def _gratification_term(self):
+        #TODO add tensorflow elements to a graph to calculate the gterm value
         pass
     def _sensor(self):
+        #TODO add tensorflow elements to a graph to calculate the sensory value.
         pass
-    def select_explorer(self):
+    def _full_pointValue(self):
+        #TODO add pointValue elements to a graph to calculate the full pointValue.
+        #       this will be differentiated with respect to the various control features.
+        pass
+    def step_explorer(self):
+        #TODO after the explorers take some steps, 
         pass
 
 class SpiderBrain(object):
