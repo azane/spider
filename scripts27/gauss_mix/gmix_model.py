@@ -183,6 +183,8 @@ def from_tanh_input(vals, rBot, rTop):
 
 #-----</Helper Functions>-----
 
+#TODO build a base class for experiential models.
+
 class GaussianMixtureModel(object):
     def TODOsFIXMEs():
         pass
@@ -386,6 +388,8 @@ class GaussianMixtureModel(object):
         
         with graph.as_default():
             self._gmix_forward_model(rd)
+            
+        #TODO maybe pickle this forward only dictionary? so it can accompany the npz file of parameters?
         
     def _gmix_forward_model(self, rd=None):
         """Build forward model and add tensors to the dict of tensorflow tensors
