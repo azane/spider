@@ -7,26 +7,7 @@ def softmax(x):
     out = e_x / e_x.sum()
     return out
 
-class Explorer(object):
-    def __init__(self, c_x):
-        super(Explorer, self).__init__()
-        
-        #The explorers control feature x location, this excludes environmental features
-        self._c_x = c_x
-        
-        self.value = 0
-        
-    def walk(self, stepVector):
-        try:
-            self._c_x += stepVector
-        except TypeError:
-            raise TypeError("Cannot add stepVector of type " + str(type(stepVector)) + " to explorer location np.ndarray.")
-    
-    def redrop(self, c_x):
-        if c_x.shape != self._c_x.shape:
-            raise ValueError("c_x must be the same shape as the existing position.")
-        self._c_x = c_x
-    
+
 class ExplorerHQ(object):
     """The 'go between' class linking trained experiential models to the the spider's control features.
     
@@ -106,10 +87,9 @@ class ExplorerHQ(object):
         self.pvRD = {}
         
         #create and drop explorers in the space
-        self.explorers = [Explorer(np.zeros(self._xDim, dtype='float64') for i in range(numExplorers))]
-        [self.drop_explorer(e) for e in self.explorers]
-        
-        self._bestExplorer = #TODO this will store the best sensor value as the explorers are stepped.
+        with self.forwardRD['graph'].as_default():
+            self.explorers = tf.Variable(0., shape=[numExplorers, self._xDim])
+            self.drop_explorer(range(numExplorers))
         
         #build point value calculation tensors
         #   fill pvRD
@@ -170,7 +150,7 @@ class ExplorerHQ(object):
         #       this modifies the steepness of the exp(). see https://www.desmos.com/calculator/etoiuwakda
         #       0>this<1. lower values are stricter, 'tighter' against the y axis.
         #   to be exposed, this will need to be added to self.pvRD
-        certaintyLeniency = tf.constant(0.1)
+        certaintyLeniency = tf.constant(0.1) #FIXME does this need to be a variable, placeholder?
         
         #NOTE: this value will always be between 0-1
         return tf.exp(-certainty/certaintyLeniency)
@@ -197,7 +177,7 @@ class ExplorerHQ(object):
         #        so there's always a chance of higher values.
         #   to be exposed, these will need to be added to self.pvRD
         gratificationTermRange = tf.constant(25) #TODO infer this from the xRange placeholder in forwardRD?
-        valueRangeEnd = tf.constant(0.001)
+        valueRangeEnd = tf.constant(0.001) #FIXME does this need to be a variable, placeholder?
         
         #calculate the shaper based on the above values. 
         shaper = -tf.log(valueRangeEnd)/gratificationTermRange
@@ -227,12 +207,16 @@ class ExplorerHQ(object):
         #       this modifies the steepness of the exp(). see https://www.desmos.com/calculator/etoiuwakda
         #       0>this<1. lower values are stricter, 'tighter' against the y axis.
         #   to be exposed, this will need to be added to self.pvRD
-        errorLeniency = tf.constant(0.1)
+        errorLeniency = tf.constant(0.1) #FIXME does this need to be a variable, placeholder?
         
         #NOTE this value will always be between 0-1
         return tf.exp(-err/errorLeniency)
         
         
+    def _explorer_location(self):
+        #TODO create a mixture model of isotropically varying gaussians with means on the explorers.
+        #       this will create an 'error' function that encourages explorers to travel away from each other.
+        #       and will generally increase the uniqueness of solutions.
     def _full_pointValue(self):
         """Return a tensor calculating the full point value.
             The derivative at explorer positions with respect to this value will determine their step direction.
@@ -254,13 +238,25 @@ class ExplorerHQ(object):
         
         
     def _build_solution_space(self):
-        with self.rd['graph'].as_default():
+        with self.forwardRD['graph'].as_default():
             self.pvRD['C'] = self._certainty()
             self.pvRD['T'] = self._gratification_term()
             self.pvRD['S'] = self._sensor()
             self.pvRD['V'] = self._full_pointValue()
         
-    def drop_explorer(self, explorer):
+    def drop_explorer(self, explorerIndices):
+        """Redrop explorers in the solution space
+            explorerIndices are the indices of the rows for the explorers in self.explorers.
+            self.explorers.assign (tf.Variable.assign) is used to assign a new array to the explorers.
+        """
+        
+        #evaluate the variable with the pvRD session.
+        
+        #modify the explorer vectors at the relevant rows in that array.
+        
+        #self.explorers.assign() that new array.
+        
+        #FIXME below is now deprecated. need to update.
         #TODO make more intelligent decisions about where to drop new explorers.
         drop = np.random.random_sample(size=self._xDim)
         #multiply the drop by the range, the difference between the range limits.
@@ -271,5 +267,5 @@ class ExplorerHQ(object):
         explorer.redrop(drop)
         
     def step_explorer(self):
-        #TODO after the explorers take some steps, 
-        pass
+        #TODO calculate the gradient of the explorers at their locations.
+        #       step them in that direction (as they are trying to find maximums)
