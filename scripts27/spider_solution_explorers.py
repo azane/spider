@@ -28,12 +28,28 @@ class Explorer(object):
         self._c_x = c_x
     
 class ExplorerHQ(object):
-    """The 'go between' class linking trained experiential models to the the spider's control features."""
+    """The 'go between' class linking trained experiential models to the the spider's control features.
+    
+    certainty_func must be a function that takes calculated values from the reference dictionary of the forward graph,
+        and calculates the difference between the two horizontal asymptotes of the integral of the squared probability distribution,
+        for this x vector. From this, a form of standard deviation is calculated and divided by the sensor's range. This gives the
+        percentage of the sensor range over which sensor values are likely to fall. This exactly reflects the certainty of any probability
+        distribution in one value, such that it can be easily integrated into the point-value function.
+        see https://www.desmos.com/calculator/zo2qkaol3j for more details on this.
+    
+    expectation_func must be a function that takes calculated values from the reference dictionary of the forward graph,
+        and calculates the expected value of this distribution. This serves as the projected sensor value for this x vector.
+    
+    
+    """
     
     #TODO if using a web server, maybe receive a pickled reference dict of the forward graph?
     def __init__(self, numExplorers, xRange, sRange, forwardRD, certainty_func, expectation_func, sensorGoal=None, modifiers=None):
         super(ExplorerHQ, self).__init__()
         
+        
+        #NOTE: self._xRange and self._sRange are not to be used as constants in tensorflow calculations.
+        #       if this is done, then we cannot update the range values of the graph after init.
         
         #use xRange and yRange to define in/out dimensionality
         #[ [rb, rt]
@@ -72,6 +88,7 @@ class ExplorerHQ(object):
         #   2. all placeholder tensors representing the parameters of the distribution
         #       this will only be directly dealt with by functions passed to this class.
         #   3. and the graph object to which these tensors are attached.
+        #   4. and the two placeholders sRange and xRange that define the in and out value ranges.
         self.forwardRD = forwardRD
         
         #this function takes tensors defining the hyperparameters of the output distribution
@@ -120,29 +137,79 @@ class ExplorerHQ(object):
         self._modifiers['S'] = mm[2]
     
     def _certainty(self):
-        """Returns the output values of the experiential model.
-            This passes the reference dictionary of the experiential model to the
+        """Returns value of the certainty given certainty strictness/leniency.
+            This passes the forward reference dictionary of the experiential model to the
              certainty_func passed on initialization.
-             certainty_func should always return the value of the indefinite integral
-              of the squared probability distribution.
+             certainty_func should always return the a tensor of the value of the indefinite integral
+              of the squared probability distribution, as it approaches infinity.
+             i.e. this is the difference between the two horizontal asymptotes of the integral(p(x)**2)
         """
         
-        raw = self._certainty_func(self.forwardRD)
+        #---<Certainty>---
+        #this section calculates the certainty, from 0-1, of predictions given the p(x)
         
+        #the value of the integral of the squared p(x) as it approaches infinity.
+        # bigI.shape should be (numExplorers, outDims)
+        bigI = self._certainty_func(self.forwardRD)
+        
+        #andy's calculation of the 'std' given the bigI
+        #NOTE: i used np functions here, because they are constants.
+        std = 1/(2*np.sqrt(np.pi)*bigI)
+        
+        #use the sRange placeholder from the forward RD.
+        absRange = tf.reduce_sum(self.forwardRD['sRange']*np.array([[-1,1]]), reduction_indices=1)
+        
+        #divide the std by the absRange, i.e. return the ratio of the range relevantly covered by the p(x)
+        certainty = std/absRange
+        #---</Certainty>---
+        
+        #---<Certainty Value>---
+        #this section calculates the certainty value given the certainty
+        
+        #TODO this value should eventually be exposed to the spider, as a constant, so that it can determine how strict it wants to be with certainty.
+        #       this modifies the steepness of the exp(). see https://www.desmos.com/calculator/etoiuwakda
+        #       0>this<1. lower values are stricter, 'tighter' against the y axis.
+        #   to be exposed, this will need to be added to self.pvRD
+        certaintyLeniency = tf.constant(0.1)
+        
+        #NOTE: this value will always be between 0-1
+        return tf.exp(-certainty/certaintyLeniency)
+        
+        #---</Certainty Value>---
         
         
     def _gratification_term(self):
-        """Return the time axis value
+        """Return the value of the gratification term.
             This allows the final solution value calculation to factor in the 'gratification term'
             i.e. the time until the solution value is realized.
         """
         #take size [-1, 1], i.e. all the rows, for that single column.
-        return tf.slice(self.forwardRD['x'], begin=[0,self._gtermIndex], size=[-1, 1])
+        gratificationTerm = tf.slice(self.forwardRD['x'], begin=[0,self._gtermIndex], size=[-1, 1])
+        
+        #TODO these values need to be exposed to the spider. see https://www.desmos.com/calculator/etoiuwakda for more info.
+        #       gratificationTermRange is the abs value of the maximum gratification term likely to be seen.
+        #        the values can go beyond that though, and not cause an issue.
+        #       valueRangeEnd is the value of the gratification term at the end of gratificationTermRange.
+        #        the size of this value determines just how little/much we care about gratification terms beyond
+        #        the described maximum in gratificationRange. low means we don't care. high means we do.
+        #        0.001 means we don't care. 0.1 means we care a lot. anything above that, and gratification range is probably too low.
+        #       the purpose of this is so that we can eventually collect values on a distribution over time,
+        #        so there's always a chance of higher values.
+        #   to be exposed, these will need to be added to self.pvRD
+        gratificationTermRange = tf.constant(25) #TODO infer this from the xRange placeholder in forwardRD?
+        valueRangeEnd = tf.constant(0.001)
+        
+        #calculate the shaper based on the above values. 
+        shaper = -tf.log(valueRangeEnd)/gratificationTermRange
+        
+        #NOTE: this value will always be between 0-1
+        return tf.exp(-shaper*gratificationTerm)
+        
         
     def _sensor(self):
-        """Return the error between the sensor goal value and the distribution expectation.
-            This is the squared error, divided by the sensor range.
-            Thus, the output will always be between 0-1.
+        """Return value of the sensor.
+            First get the squared error to the goal, then divide that by the squared range.
+            Then, take this 0-1 value and calculate value for this error.
         """
         
         self.pvRD['sensorGoal'] = tf.placeholder(tf.float32, shape=[1, self._sDim])
@@ -151,16 +218,30 @@ class ExplorerHQ(object):
         
         #the squared distance to the goal
         num = tf.square(self.pvRD['sensorGoal'] - s)
-        #the difference between the top and the bottom
-        den = tf.reduce_sum(self._yRange*np.array([[-1,1]]), reduction_indices=1)
+        #the difference between the top and the bottom, squared
+        den = tf.square(tf.reduce_sum(self._sRange*np.array([[-1,1]]), reduction_indices=1))
         
-        return (num/den)
+        err = (num/den)
+        
+        #TODO this value should eventually be exposed to the spider, as a constant, so that it can determine how strict it wants to be with the sensor error.
+        #       this modifies the steepness of the exp(). see https://www.desmos.com/calculator/etoiuwakda
+        #       0>this<1. lower values are stricter, 'tighter' against the y axis.
+        #   to be exposed, this will need to be added to self.pvRD
+        errorLeniency = tf.constant(0.1)
+        
+        #NOTE this value will always be between 0-1
+        return tf.exp(-err/errorLeniency)
+        
         
     def _full_pointValue(self):
         """Return a tensor calculating the full point value.
             The derivative at explorer positions with respect to this value will determine their step direction.
         """
         
+        #NOTE: remember, these modifiers are changed to sum to 1.
+        #       when exp()s are multiplied by these modifiers,
+        #       that sets the maximum value of the exp() to that modifier.
+        #       thus, c+t+s can never exceed 1.
         self.pvRD['modifier_C'] = tf.placeholder(tf.float32, shape=[1,])
         self.pvRD['modifier_T'] = tf.placeholder(tf.float32, shape=[1,])
         self.pvRD['modifier_S'] = tf.placeholder(tf.float32, shape=[1,])
