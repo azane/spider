@@ -25,12 +25,42 @@ class ExplorerHQ(object):
     """
     
     #TODO if using a web server, maybe receive a pickled reference dict of the forward graph?
-    def __init__(self, numExplorers, xRange, sRange, forwardRD, certainty_func, expectation_func, sensorGoal=None, modifiers=None):
+    def __init__(self, numExplorers, xRange, sRange, forwardRD, certainty_func, expectation_func, sensorGoal=None, modifiers=None, forwardMapper=None):
         super(ExplorerHQ, self).__init__()
         
+        #---<Forward Mapper>---
+        #a dict used in referencing the forwardRD.
+        # self.forwardRD[self.forwardMapper['xRange']] -> self.forwardRD['inRange']
+        if forwardMapper is None:
+            self.forwardMapper = dict(
+                x='x',
+                xRange='inRange',
+                sRange='outRange',
+                graph='graph'
+            )
+        else:
+            try:
+                forwardMapper['x']
+                forwardMapper['xRange']
+                forwardMapper['sRange']
+                forwardMapper['graph']
+            except KeyError:
+                raise ValueError("The 'forwardMapper' dictionary must define at least 'x', 'xRange', 'sRange' and 'graph'")
+                
+        #the reference dictionary of tensors in the forward model.
+        #   this should hold at least
+        #   1. one placeholder tensor x, where x[:,-1] are the gratification term values
+        #   2. all placeholder tensors representing the parameters of the distribution
+        #       this will only be directly dealt with by functions passed to this class.
+        #   3. and the graph object to which these tensors are attached.
+        #   4. and the two placeholders sRange and xRange that define the in and out value ranges.
+        self.forwardRD = forwardRD
+        #---</Forward Mapper>---
         
+        #---<Ranges>---
         #NOTE: self._xRange and self._sRange are not to be used as constants in tensorflow calculations.
         #       if this is done, then we cannot update the range values of the graph after init.
+        #       instead, calculations referencing the ranges should reference xRange and sRange in the forwardRD
         
         #use xRange and yRange to define in/out dimensionality
         #[ [rb, rt]
@@ -44,7 +74,9 @@ class ExplorerHQ(object):
         assert sRange.shape[1] == 2
         self._sRange = sRange
         self._sDim = self._sRange.shape[0]
+        #---</Ranges>---
         
+        #---<Point Value Hyperparameters>---
         #sensorGoal is the goal vector for the sensors.
         self._sensorGoal = np.ones(self._sDim)
         if sensorGoal is not None:
@@ -61,17 +93,9 @@ class ExplorerHQ(object):
             ))
         else:
             self.update_modifiers(modifiers)
-            
+        #---</Point Value Hyperparameters>---
         
-        #the reference dictionary of tensors in the forward model.
-        #   this should hold at least
-        #   1. one placeholder tensor x, where x[:,-1] are the gratification term values
-        #   2. all placeholder tensors representing the parameters of the distribution
-        #       this will only be directly dealt with by functions passed to this class.
-        #   3. and the graph object to which these tensors are attached.
-        #   4. and the two placeholders sRange and xRange that define the in and out value ranges.
-        self.forwardRD = forwardRD
-        
+        #---<Experiential Model Dependent Functions>---
         #this function takes tensors defining the hyperparameters of the output distribution
         # from forwardRD and returns a tensor computing the certainty of the distribution
         self._certainty_func = certainty_func
@@ -79,29 +103,36 @@ class ExplorerHQ(object):
         #this function takes tensors defining the hyperparameters of the output distribution
         # from forwardRD and returns a tensor computing the expectation of the distribution
         self._expectation_func = expectation_func
+        #---</Experiential Model Dependent Functions>---
         
+        #---<Misc>---
         #temp? assume that the gratification term is the last input.
         self._gtermIndex = (self._xDim - 1)
+        #---</Misc>---
         
+        #---<Build TF Graph>---
         #the reference dictionary of point value elements
         self.pvRD = {}
         
         #create and drop explorers in the space
-        with self.forwardRD['graph'].as_default():
-            self.explorers = tf.Variable(0., shape=[numExplorers, self._xDim])
+        with self.forwardRD[self.forwardMapper['graph']].as_default():
+            self.explorers = tf.Variable(0., shape=[numExplorers, self._xDim], dtype=tf.float32)
             self.drop_explorer(range(numExplorers))
         
         #build point value calculation tensors
         #   fill pvRD
         self._build_solution_space()
+        #---</Build TF Graph>---
     
     def update_sensorGoal(self, sensorGoal):
+        """Updates sensorGoal attribute after verification
+        """
         assert sensorGoal.shape == self._sensorGoal.shape
         assert sensorGoal.dtype == sensorGoal.dtype
         self._sensorGoal = sensorGoal
     
     def update_modifiers(self, modifiers):
-        """Computes the softmax of the passed modifiers.
+        """Computes the softmax of the verified modifiers and updates attribute.
         """
         try:
             arr = np.array((modifiers['C'], modifiers['T'], modifiers['S']), dtype=float)
@@ -117,13 +148,15 @@ class ExplorerHQ(object):
         self._modifiers['S'] = mm[2]
     
     def _certainty(self):
-        """Returns value of the certainty given certainty strictness/leniency.
-            This passes the forward reference dictionary of the experiential model to the
-             certainty_func passed on initialization.
-             certainty_func should always return the a tensor of the value of the indefinite integral
-              of the squared probability distribution, as it approaches infinity.
-             i.e. this is the difference between the two horizontal asymptotes of the integral(p(x)**2)
+        """Returns tensor calculating the value of the certainty given certainty strictness/leniency.
         """
+        
+        #NOTE:
+        #This passes the forward reference dictionary of the experiential model to the
+        # certainty_func passed on initialization.
+        # certainty_func should always return the a tensor of the value of the indefinite integral
+        #  of the squared probability distribution, as it approaches infinity.
+        # i.e. this is the difference between the two horizontal asymptotes of the integral(p(x)**2)
         
         #---<Certainty>---
         #this section calculates the certainty, from 0-1, of predictions given the p(x)
@@ -133,11 +166,11 @@ class ExplorerHQ(object):
         bigI = self._certainty_func(self.forwardRD)
         
         #andy's calculation of the 'std' given the bigI
-        #NOTE: i used np functions here, because they are constants.
+        #NOTE: i used np functions here, because the sqrt of pi is a constant.
         std = 1/(2*np.sqrt(np.pi)*bigI)
         
         #use the sRange placeholder from the forward RD.
-        absRange = tf.reduce_sum(self.forwardRD['sRange']*np.array([[-1,1]]), reduction_indices=1)
+        absRange = tf.reduce_sum(self.forwardRD[self.forwardMapper['sRange']]*np.array([[-1,1]]), reduction_indices=1)
         
         #divide the std by the absRange, i.e. return the ratio of the range relevantly covered by the p(x)
         certainty = std/absRange
@@ -159,12 +192,12 @@ class ExplorerHQ(object):
         
         
     def _gratification_term(self):
-        """Return the value of the gratification term.
+        """Return valuation tensor of the gratification term.
             This allows the final solution value calculation to factor in the 'gratification term'
             i.e. the time until the solution value is realized.
         """
         #take size [-1, 1], i.e. all the rows, for that single column.
-        gratificationTerm = tf.slice(self.forwardRD['x'], begin=[0,self._gtermIndex], size=[-1, 1])
+        gratificationTerm = tf.slice(self.forwardRD[self.forwardMapper['x']], begin=[0,self._gtermIndex], size=[-1, 1])
         
         #TODO these values need to be exposed to the spider. see https://www.desmos.com/calculator/etoiuwakda for more info.
         #       gratificationTermRange is the abs value of the maximum gratification term likely to be seen.
@@ -187,12 +220,14 @@ class ExplorerHQ(object):
         
         
     def _sensor(self):
-        """Return value of the sensor.
+        """Returns valuating tensor of the sensor estimation.
             First get the squared error to the goal, then divide that by the squared range.
             Then, take this 0-1 value and calculate value for this error.
         """
         
-        self.pvRD['sensorGoal'] = tf.placeholder(tf.float32, shape=[1, self._sDim])
+        self.pvRD['sensorGoal'] = tf.placeholder(tf.float32, shape=[self._sDim])
+        #expand for broadcasting over explorers.
+        tf.expand_dims(self.pvRD['sensorGoal'], 0)  # .shape == (1, self._sDim)
         
         s = self._expectation_func(self.forwardRD)
         
@@ -213,10 +248,34 @@ class ExplorerHQ(object):
         return tf.exp(-err/errorLeniency)
         
         
-    def _explorer_location(self):
+    def _explorer_isolation(self):
         #TODO create a mixture model of isotropically varying gaussians with means on the explorers.
         #       this will create an 'error' function that encourages explorers to travel away from each other.
         #       and will generally increase the uniqueness of solutions.
+        
+        #what if a grid approach is used, where explorers are made to stay in their grid?
+        
+        #what if an explorers 'grid' is simply a gaussian with mean of their initial drop?
+        
+        #also....i think we would only need one mixture function of positional gaussians.
+        #   because, if each explorer sits perfectly atop their gaussian, the gradient with respect to their position will be 0.
+        #   in other words, only other explorers can actually affect the gradient of this value, as only other explorer's gaussians
+        #   will have means not centered on the explorer in question!
+        
+        #also, this isn't a probability distribution, so it doesn't have to sum to one. what if we square mixture?
+        #   so that if two explorers pile up on each other, then that point is exponentially less favorable to other explorers.
+        
+        #what would we put as the variance? we'd use a diagonal, as we want the variance isotropic, i.e. centered in all directions.
+        #   actually....maybe it shouldn't be centered? but "centered" if the ranges were normalized?
+        #   yup. that's it.
+        #   a mixture of gaussians, centered on each explorer, with their covariance such that the gaussian spreads over each x dimension at the same
+        #    fraction of that x dimension's range.
+        #   the magnitute of the covariance then, should be determined by the number of explorers and the dimensionality.
+        #       so, 2 explorers on 1 dimension, would have a standard deviation of 1/4 of the range, so each covers half of the space?
+        #       2 explorers in 2 dimensions, would have a standard deviation...
+        
+        #but how does this fit into the other point value elements? should the 
+        pass
     def _full_pointValue(self):
         """Return a tensor calculating the full point value.
             The derivative at explorer positions with respect to this value will determine their step direction.
@@ -238,11 +297,18 @@ class ExplorerHQ(object):
         
         
     def _build_solution_space(self):
-        with self.forwardRD['graph'].as_default():
+        """Calls all the graph building functions and stores in pvRD.
+        """
+        with self.forwardRD[self.forwardMapper['graph']].as_default():
             self.pvRD['C'] = self._certainty()
             self.pvRD['T'] = self._gratification_term()
             self.pvRD['S'] = self._sensor()
             self.pvRD['V'] = self._full_pointValue()
+            
+            self.pvRD['stepper'] = self._build_explorer_stepper()
+            
+            self.pvRD['sess'] = tf.Session()
+            self.pvRD['sess'].run(tf.initialize_all_variables())
         
     def drop_explorer(self, explorerIndices):
         """Redrop explorers in the solution space
@@ -250,22 +316,50 @@ class ExplorerHQ(object):
             self.explorers.assign (tf.Variable.assign) is used to assign a new array to the explorers.
         """
         
-        #evaluate the variable with the pvRD session.
+        #get current explorer positions
+        npExplorers = self.explorers.eval(session=self.pvRD['sess'])
         
-        #modify the explorer vectors at the relevant rows in that array.
+        #generate new drop points in range.
+        drop = np.random.random_sample(size=(len(explorerIndices), self._xDim))
+        drop *= np.sum((self._xRange*np.array([[[-1,1]]])), axis=2)
+        drop += np.expand_dims(self._xRange[:,0],0)
         
-        #self.explorers.assign() that new array.
+        #update positions
+        npExplorers[explorerIndices] = drop
         
-        #FIXME below is now deprecated. need to update.
-        #TODO make more intelligent decisions about where to drop new explorers.
-        drop = np.random.random_sample(size=self._xDim)
-        #multiply the drop by the range, the difference between the range limits.
-        drop *= np.sum((self._xRange*np.array([[-1,1]])), axis=1)
-        #add the bottom of the range to the drop value
-        drop += self._xRange[:,0]
-        #redrop the explorer
-        explorer.redrop(drop)
+        #reassign positions to tf variable.
+        self.explorers.assign(npExplorers)
         
+    def _build_explorer_stepper(self):
+        """Returns a tensor that calculates the gradient of the point value and steps the explorers uphill.
+            This also needs to integrate the explorers variable into the x placeholder process.
+        """
+        
+        #FIXME 9dii10289hti ...i don't know how to to integrate the explorers...
+        #       so i guess for now, we'll just calculate the gradient with respect to x.
+        #       but i'm not sure you can calculate a gradient with respect to a placeholder?
+        #calculate the gradient of the point values given explorer/x locations.
+        explorerGrads = tf.gradient(self.pvRD['V'], self.forwardRD[self.forwardMapper['x']])
+        
+        #TODO expose this to the spider. make it a variable so it can change.
+        rate = 1
+        
+        return self.explorers.assign_add(explorerGrads*rate)
+    
     def step_explorer(self):
-        #TODO calculate the gradient of the explorers at their locations.
-        #       step them in that direction (as they are trying to find maximums)
+        """Evaluates the explorer stepper tensor to step explorers uphill.
+        """
+        feed_dict = {
+                        self.forwardRD[self.forwardMapper['x']]:self.explorers, #FIXME i don't know if a tf.Variable can be fed into a placeholder? 9dii10289hti
+                        self.forwardRD[self.forwardMapper['xRange']]:self._xRange,
+                        self.forwardRD[self.forwardMapper['sRange']]:self._sRange,
+                        
+                        self.pvRD['sensorGoal']:self._sensorGoal,
+                        self.pvRD['modifer_C']:self._modifiers['C'],
+                        self.pvRD['modifer_T']:self._modifiers['T'],
+                        self.pvRD['modifer_S']:self._modifiers['S']
+                    }
+        #FIXME 9dii10289hti . if not, then explorers can just be a numpy array...either way, it probably should be, i guess.
+        
+        #evaluate the stepper to step explorers uphill.
+        self.pvRD['sess'].run([self.pvRD['stepper']], feed_dict=feed_dict)

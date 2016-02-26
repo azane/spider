@@ -472,10 +472,6 @@ class GaussianMixtureModel(object):
             # massage inputs to tanh range (-2.5,2.5)
             netIn = to_tanh_input(fullIn, rBot=eRInB, rTop=eRInT)
             
-            ##TODO FIXME I'm going to need to calculate the weight and bias gradients...
-            #               but that's all it seems to be getting wrong. the layer activations seem correct.
-            #               from those, it should be easy to calculate stuff.
-            
             #run ANN
             lay1 = tf.tanh( (tf.matmul(netIn, w1)) + b1)
             #lay1 = tf.nn.bias_add(tf.matmul(netIn, w1), b1)
