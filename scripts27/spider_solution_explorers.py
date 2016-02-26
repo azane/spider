@@ -363,3 +363,8 @@ class ExplorerHQ(object):
         
         #evaluate the stepper to step explorers uphill.
         self.pvRD['sess'].run([self.pvRD['stepper']], feed_dict=feed_dict)
+
+def gmm_bigI(forwardRD):
+    #NOTE: the sum rule takes the gaussian
+def gmm_expectation(forwardRD):
+    
