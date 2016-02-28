@@ -16,6 +16,9 @@ import numpy as np
 #           then, if the physiology mutates to take advantage of that particular node initialization argument, good!
 #               but, if not, the values are still generated over the correct range.
 
+#FIXME 18691019djdks Nodes should not bother returning their control features. ExplorersHQ takes care of retaining those values.
+#                       if the actual control feature might differ from the explorersHQ setting, then it should be returned as an environmental feature.
+
 class BaseNode(object):
     """The base class for all nodes, including muscles.
     When initializing:

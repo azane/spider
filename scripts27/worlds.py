@@ -5,6 +5,8 @@
     Each world has three methods, __init__() in which world-wide settings are selected, environment(), in which the non-agential elements are added to the space
         and agents(), in which all agents are added to the space.
         just for namespace safety, methods not trying to overwrite are prefixed with 'spi_', for the spider project."""
+import os
+import sys
 
 import pymunk as pymunk
 import numpy as np
@@ -13,6 +15,9 @@ from pyglet.window import key, mouse
 
 from spider_physiology import SpiderPhysiology
 from spider_brain import SpiderBrain
+sys.path.append('/Users/azane/GitRepo/spider/scripts27/gauss_mix/')
+import gmix_model as gmm
+import spider_solution_explorers as sexp
 
 
 ##TODO write a base class for worlds. It will need direct support for multiple agents, not just one like ConveyorTest. but. ConveyorTest is close.
@@ -98,7 +103,26 @@ class ConveyorTest(pymunk.Space):
         
         l.extend(self.spi_spider.draw_these()) #pass draw
         
-        self.spi_brain = SpiderBrain(self.spi_spider)
+        #---<temp>---
+        s_x, s_t = gmm.get_xt_from_npz("data/spi_gmix_train.npz")
+        t_x, t_t = gmm.get_xt_from_npz("data/spi_gmix_train.npz")
+        #train for only some dimensions.
+        xDims = np.array([0,1,2,-1]) #muscle, muscle, balance, time
+        s_x = s_x[:,xDims]
+        t_x = t_x[:,xDims]
+        
+        expModel = gmm.GaussianMixtureModel(s_x, s_t, t_x, t_t, numGaussianComponents=15, hiddenLayerSize=20, learningRate=1e-3, buildGraph=False, debug=False)
+        forwardRD = expModel.spi_get_forward_model()
+        
+        expHQ = sexp.ExplorerHQ(numExplorers=3, xRange=expModel.inRange, sRange=expModel.outRange, forwardRD=forwardRD,
+                                certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
+                                modifiers=dict(C=1., T=1., S=1.))
+        
+        params = np.load("data/spi_gmm_wb.npz")
+        expHQ.update_params(w1=params['w1'], w2=params['w2'], w3=params['w3'], b1=params['b1'], b2=params['b2'], b3=params['b3'])
+        #---</temp>---
+        
+        self.spi_brain = SpiderBrain(self.spi_spider, expHQ)
         
         return l
         

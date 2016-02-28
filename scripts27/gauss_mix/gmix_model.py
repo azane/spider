@@ -377,19 +377,30 @@ class GaussianMixtureModel(object):
         """
         i = np.random.random_integers(0, high=x.shape[0]-1, size=size)
         return x[i], t[i]
-    def spi_get_forward_model(self, rd, graph):
+    def spi_get_forward_model(self, rd=None, graph=None):
         """Takes a graph and builds the forward model on that graph, take a dictionary and fill it with tensors.
             This graph can be passed in from elsewhere (the spider), so that the spider can choose to build only the forward model for its graphs.
             If a spider just wants the forward model and doesn't need to train the model at all (i.e. is using a web server or just doesn't need to train anymore),
              the spider should initialize the GMM with 'buildGraph' and 'debug' set as False.
         """
-        assert type(rd) is dict
-        assert graph is not self.graph
+        if rd is None:
+            rd = {}
+        else:
+            assert type(rd) is dict
+        
+        if graph is None:
+            graph = tf.Graph()
+        else:
+            assert graph is not self.graph
         
         with graph.as_default():
             self._gmix_forward_model(rd)
             
         #TODO maybe pickle this forward only dictionary? so it can accompany the npz file of parameters?
+        
+        rd['graph'] = graph
+        
+        return rd
         
     def _gmix_forward_model(self, rd=None):
         """Build forward model and add tensors to the dict of tensorflow tensors
@@ -446,6 +457,8 @@ class GaussianMixtureModel(object):
         #-----<ANN Construction>-----
         with tf.name_scope('ANN_const') as scope:
             #two hidden layers
+            
+            print "forward: " + str((inDims, hiddenLayerSize))
             
             w1 = self._weight_variable([inDims, hiddenLayerSize])
             b1 = self._bias_variable([hiddenLayerSize])

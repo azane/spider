@@ -25,7 +25,8 @@ class ExplorerHQ(object):
     """
     
     #TODO if using a web server, maybe receive a pickled reference dict of the forward graph?
-    def __init__(self, numExplorers, xRange, sRange, forwardRD, certainty_func, expectation_func, sensorGoal=None, modifiers=None, forwardMapper=None):
+    def __init__(self, numExplorers, xRange, sRange, forwardRD, certainty_func, expectation_func, parameter_update_func,
+                    sensorGoal=None, modifiers=None, forwardMapper=None):
         super(ExplorerHQ, self).__init__()
         
         #---<Forward Mapper>---
@@ -66,13 +67,13 @@ class ExplorerHQ(object):
         #[ [rb, rt]
         #  [rb, rt] ]
         assert xRange.shape[1] == 2
-        self._xRange = xRange
+        self._xRange = xRange.astype(np.float32, casting='same_kind')
         self._xDim = self._xRange.shape[0]
         
         #remember that 'sensors' are spit out as probability distributions.
         #    so it may be better to think of this as the 'sensor expected value' range.
         assert sRange.shape[1] == 2
-        self._sRange = sRange
+        self._sRange = sRange.astype(np.float32, casting='same_kind')
         self._sDim = self._sRange.shape[0]
         #---</Ranges>---
         
@@ -87,8 +88,8 @@ class ExplorerHQ(object):
         self._modifiers = dict(C=None, T=None, S=None)
         if modifiers is None:
             self.update_modifiers(dict(
-                C=np.random.random_sample()
-                T=np.random.random_sample()
+                C=np.random.random_sample(),
+                T=np.random.random_sample(),
                 S=np.random.random_sample()
             ))
         else:
@@ -96,13 +97,16 @@ class ExplorerHQ(object):
         #---</Point Value Hyperparameters>---
         
         #---<Experiential Model Dependent Functions>---
-        #this function takes tensors defining the hyperparameters of the output distribution
+        #this function takes tensors defined the hyperparameters of the output distribution
         # from forwardRD and returns a tensor computing the certainty of the distribution
         self._certainty_func = certainty_func
         
-        #this function takes tensors defining the hyperparameters of the output distribution
+        #this function takes tensors defined the hyperparameters of the output distribution
         # from forwardRD and returns a tensor computing the expectation of the distribution
         self._expectation_func = expectation_func
+        
+        #this function takes args and sets the trained parameters of the forwardRD
+        self._p_update_func = parameter_update_func
         #---</Experiential Model Dependent Functions>---
         
         #---<Misc>---
@@ -116,14 +120,16 @@ class ExplorerHQ(object):
         
         #create and drop explorers in the space
         with self.forwardRD[self.forwardMapper['graph']].as_default():
-            self.explorers = tf.Variable(0., shape=[numExplorers, self._xDim], dtype=tf.float32)
+            self.pvRD['sess'] = tf.Session()
+            self.explorers = tf.Variable(tf.zeros([numExplorers, self._xDim]))
+            self.pvRD['sess'].run(tf.initialize_all_variables())
             self.drop_explorer(range(numExplorers))
         
         #build point value calculation tensors
         #   fill pvRD
         self._build_solution_space()
         #---</Build TF Graph>---
-    
+        
     def update_sensorGoal(self, sensorGoal):
         """Updates sensorGoal attribute after verification
         """
@@ -209,7 +215,7 @@ class ExplorerHQ(object):
         #       the purpose of this is so that we can eventually collect values on a distribution over time,
         #        so there's always a chance of higher values.
         #   to be exposed, these will need to be added to self.pvRD
-        gratificationTermRange = tf.constant(25) #TODO infer this from the xRange placeholder in forwardRD?
+        gratificationTermRange = tf.constant(25.) #TODO infer this from the xRange placeholder in forwardRD?
         valueRangeEnd = tf.constant(0.001) #FIXME does this need to be a variable, placeholder?
         
         #calculate the shaper based on the above values. 
@@ -234,7 +240,7 @@ class ExplorerHQ(object):
         #the squared distance to the goal
         num = tf.square(self.pvRD['sensorGoal'] - s)
         #the difference between the top and the bottom, squared
-        den = tf.square(tf.reduce_sum(self._sRange*np.array([[-1,1]]), reduction_indices=1))
+        den = tf.square(tf.reduce_sum(self._sRange*np.array([[-1.,1.]], dtype=np.float32), reduction_indices=1))
         
         err = (num/den)
         
@@ -285,13 +291,17 @@ class ExplorerHQ(object):
         #       when exp()s are multiplied by these modifiers,
         #       that sets the maximum value of the exp() to that modifier.
         #       thus, c+t+s can never exceed 1.
-        self.pvRD['modifier_C'] = tf.placeholder(tf.float32, shape=[1,])
-        self.pvRD['modifier_T'] = tf.placeholder(tf.float32, shape=[1,])
-        self.pvRD['modifier_S'] = tf.placeholder(tf.float32, shape=[1,])
+        self.pvRD['modifier_C'] = tf.placeholder(tf.float32, shape=())
+        self.pvRD['modifier_T'] = tf.placeholder(tf.float32, shape=())
+        self.pvRD['modifier_S'] = tf.placeholder(tf.float32, shape=())
         
-        c = self.pvRD['modifier_C']*self.pvRD['C']
-        t = self.pvRD['modifier_T']*self.pvRD['T']
-        s = self.pvRD['modifier_S']*self.pvRD['S']
+        c = self.pvRD['modifier_C']*self.pvRD['C']  # shape == (e,s)
+        t = self.pvRD['modifier_T']*self.pvRD['T']  # shape == (e)
+        s = self.pvRD['modifier_S']*self.pvRD['S']  # shape == (e,s)
+        
+        #TEMP we'll want a more sophisticated, modifiable way for weighting the value of different sensors.
+        c = tf.reduce_mean(c, 1)
+        s = tf.reduce_mean(s, 1)
         
         return c+t+s
         
@@ -307,7 +317,6 @@ class ExplorerHQ(object):
             
             self.pvRD['stepper'] = self._build_explorer_stepper()
             
-            self.pvRD['sess'] = tf.Session()
             self.pvRD['sess'].run(tf.initialize_all_variables())
         
     def drop_explorer(self, explorerIndices):
@@ -335,36 +344,157 @@ class ExplorerHQ(object):
             This also needs to integrate the explorers variable into the x placeholder process.
         """
         
+        #FIXME need to find a way to only calculate the gradients of the control features. use tf.dynamic_partition?
+        
         #FIXME 9dii10289hti ...i don't know how to to integrate the explorers...
         #       so i guess for now, we'll just calculate the gradient with respect to x.
         #       but i'm not sure you can calculate a gradient with respect to a placeholder?
         #calculate the gradient of the point values given explorer/x locations.
-        explorerGrads = tf.gradient(self.pvRD['V'], self.forwardRD[self.forwardMapper['x']])
+        explorerGrads = tf.gradients(self.pvRD['V'], [self.forwardRD[self.forwardMapper['x']]])
         
         #TODO expose this to the spider. make it a variable so it can change.
-        rate = 1
+        rate = 1.
         
-        return self.explorers.assign_add(explorerGrads*rate)
+        return self.explorers.assign_add(explorerGrads[0]*rate)
     
     def step_explorer(self):
         """Evaluates the explorer stepper tensor to step explorers uphill.
         """
         feed_dict = {
-                        self.forwardRD[self.forwardMapper['x']]:self.explorers, #FIXME i don't know if a tf.Variable can be fed into a placeholder? 9dii10289hti
+                        #FIXME can't feed variable to placeholder, just make explorers a numpy array. 9dii10289hti
+                        self.forwardRD[self.forwardMapper['x']]:self.explorers.eval(session=self.pvRD['sess']),
                         self.forwardRD[self.forwardMapper['xRange']]:self._xRange,
                         self.forwardRD[self.forwardMapper['sRange']]:self._sRange,
                         
                         self.pvRD['sensorGoal']:self._sensorGoal,
-                        self.pvRD['modifer_C']:self._modifiers['C'],
-                        self.pvRD['modifer_T']:self._modifiers['T'],
-                        self.pvRD['modifer_S']:self._modifiers['S']
+                        self.pvRD['modifier_C']:self._modifiers['C'],
+                        self.pvRD['modifier_T']:self._modifiers['T'],
+                        self.pvRD['modifier_S']:self._modifiers['S']
                     }
         #FIXME 9dii10289hti . if not, then explorers can just be a numpy array...either way, it probably should be, i guess.
+        #                        i mean, if we have to say variable.eval() then we should just store it as a numpy array.
         
         #evaluate the stepper to step explorers uphill.
         self.pvRD['sess'].run([self.pvRD['stepper']], feed_dict=feed_dict)
+    def update_params(self, *args, **kwargs):
+        """Runs parameter updater for forward model.
+        """
+        self._p_update_func(self.forwardRD, *args, **kwargs)
+        
+    def update_environs_only(self, x, envIndices=None, conIndices=None):
+        """Update only environmental values in explorer vectors.
+            This method is used when previously dictated control features may not be fully set in the spider.
+                This occurs in direct control features if those are also controlled by a human.
+                This occurs in abstracted 'control features' (sensors) when setting a control feature does not necessarily mean
+                    that that control feature will respond immediately.
+                
+            'envIndices' (environmental features indices) or 'conIndices' (control feature indices) must be defined
+                they should be array like and hold the indices of the respective feature types
+        """
+        
+        #NOTE: remember that explorers only move a little bit each time, but they chase maximums that move slowly as well.
+        #       if their position is overwritten, then they may lose progress on the maximum they are chasing.
+        #       remember that the actual control feature settings are not necessarily considered by explorers.
+        #       their position is considered. if the actual control feature setting is deemed helpful, then it should
+        #       be recorded as a node as well.
+        #       FIXME 18691019djdks i think this means that the nodes should not bother returning the values of their control features.
+        
+        #create base partition array
+        ePartition = np.zeros(self._xDim)
+        
+        #update with indices.
+        if (envIndices is not None) and (conIndices is not None):
+            raise ValueError("Only one of envIndices and conIndices should be defined.")
+        elif conIndices is not None:
+            ePartition[conIndices] = 1  # set to control partition
+            ePartition = np.logical_not(ePartition)  # negate control partition
+        elif envIndices is not None:
+            ePartition[envIndices] = 1
+        else:
+            raise ValueError("Either envIndices or conIndices must be defined.")
+        
+        #maskify
+        ePartition = ePartition.astype(bool)
+        
+        #get environs from x
+        environs = x[ePartition]
+        
+        #get numpy explorers from tf variable
+        explorers = self.explorers.eval(session=self.pvRD['sess'])
+        
+        #set environmental features on all explorers
+        explorers[:,ePartition] = environs
+        
+        self.explorers.assign(explorers)
+        
+    def update_all(self, x):
+        """This should only be used when control features are guaranteed to respond immediately to their set value.
+        """
+        self.explorers.assign(x)
 
-def gmm_bigI(forwardRD):
-    #NOTE: the sum rule takes the gaussian
-def gmm_expectation(forwardRD):
+
+#---<GMM helpers>---
+def _fix_mvu(m, v, u):
+    """Shape mvu coming out of forwardRD so it makes more sense.
+    """
     
+    # m.shape == (e,g)
+    # v.shape == (e,t)
+    # u.shape == (e,g,t)
+    
+    m = tf.expand_dims(m, 2)  # shape == (e,g,1)
+    v = tf.expand_dims(v, 1)  # shape == (e,1,t)
+    #u = u  # shape == (e,g,t)
+    
+    return m, v, u
+    
+def gmm_bigI(forwardRD):
+    """Compute the bigI of a gaussian mixture model, given mvu.
+        See wiki page at https://github.com/azane/spider/wiki/Certainty-of-a-Gaussian-Mixture-Model for details.
+    """
+    
+    m, v, u = _fix_mvu(forwardRD['m'], forwardRD['v'], forwardRD['u'])
+    
+    #e-number of explorers or samples
+    #g-number of gaussian components
+    #t-number of output/target dimensions
+    
+    #get mvu and add dim for .shape == (e, g, t, 1)
+    m1 = tf.expand_dims(m, 3)  # shape == (e, g, 1, 1)
+    v1 = tf.expand_dims(v, 3)  # shape == (e, 1, t, 1)
+    u1 = tf.expand_dims(u, 3)  # shape == (e, g, t, 1)
+    
+    #get transpose of the components for .shape == (e, 1, t, g)
+    m2 = tf.transpose(m1, perm=[0,3,2,1])
+    v2 = tf.transpose(v1, perm=[0,3,2,1])
+    u2 = tf.transpose(u1, perm=[0,3,2,1])
+    
+    #compute the bigI of each pair
+    ssv = tf.square(v1) + tf.square(v2)  # sum of squared variance
+    den = 1/(np.sqrt(2*np.pi)*tf.sqrt(ssv))
+    num = tf.exp(-tf.square(u1-u2)/(2*ssv))
+    unSummed = (m1*m2)*(num/den)
+    
+    #sum over these elements over the components for the total bigI
+    return tf.reduce_sum(unSummed, [1,3])  # from .shape == (e, g, t, g) to .shape == (e,t)
+    
+def gmm_expectation(forwardRD):
+    """
+        The sum of m*u
+    """
+    m, v, u = _fix_mvu(forwardRD['m'], forwardRD['v'], forwardRD['u'])
+    
+    #sum over the components.
+    return tf.reduce_sum((m*u), [1])  # from shape == (e,g,t) to shape == (e,t)
+    
+def gmm_p_updater(forwardRD, w1, b1, w2, b2, w3, b3):
+    """Assigns trained parameters to the gmm forward model.
+    """
+    forwardRD['w1'].assign(w1)
+    forwardRD['b1'].assign(b1)
+    forwardRD['w2'].assign(w2)
+    forwardRD['b2'].assign(b2)
+    forwardRD['w3'].assign(w3)
+    forwardRD['b3'].assign(b3)
+    
+#---<GMM helpers>---

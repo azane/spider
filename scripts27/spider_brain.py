@@ -1,13 +1,17 @@
 import numpy as np
 
 class SpiderBrain(object):
-    def __init__(self, physiology):
+    def __init__(self, physiology, explorerHQ):
         super(SpiderBrain, self).__init__()
         
         #a SpiderPhysiology object passed in from the world so the brain can access it's body.
         self.physiology = physiology
-        
         self.allNodes = self.physiology.nodes
+        
+        #an initialized ExplorersHQ object
+        #TODO maybe have this class take care of initializing this eventually,
+        #       but the init is messy atm, so just pass it in for now.
+        self.explorerHQ = explorerHQ
         
         #----<Data Recording Values>----
         #the max amount of experiential points to keep stored. once this value exceeded, the oldest data will be discarded.
@@ -34,7 +38,9 @@ class SpiderBrain(object):
         #       2. self.y_timeSeries
         #       3. self.x_data
         #       4. self.y_data
+        #       5. self._controlIndices
         self.__define_series()
+        
         
     def __define_series(self):
         """Preps arrays in the name of pre-allocation.
@@ -42,11 +48,13 @@ class SpiderBrain(object):
             2. A series of sensory features: y
             3. A data store holding x data cast over the time axis.
             4. A data store holding y corresponding to rows in #3.
+            5. An array of indices corresponding to control features in x
            Also verifies node data shapes and numpyness.
         """
         
         xWidth = 0
         yWidth = 0
+        controlIndices = []
         
         #iterate nodes to get the number of array columns needed.
         for node in self.allNodes:
@@ -56,8 +64,19 @@ class SpiderBrain(object):
             e = cts_data['environmental'].size  # environmental features
             s = cts_data['sensory'].size  # sensory features
             
+            #in _update_series, control features are recorded first from each node.
+            controlIndices.extend(range(xWidth, c))
+            
             xWidth += c + e
             yWidth += s
+        
+        #in _generate_data_over_time, the lookbackColumn is added last
+        #   while not properly a control feature, the explorers make decisions based on the time axis.
+        #   anyway, it is a pseudo control feature, not an environmental feature.
+        #   see the wiki for more details.
+        controlIndices.append(xWidth)
+        
+        self._controlIndices = np.array(controlIndices)
         
         #Use np.zeros, defaulting to float dtype, so in-place modification can occur.
         #create empty time series arrays using the specified series size, and inferred widths.
@@ -72,8 +91,8 @@ class SpiderBrain(object):
         self.y_data = np.zeros((self.dataSize, yWidth))
     
     def step(self, dt):
-        """Retrieves data, steps the time series, and stores points generates over the time axis in data.
-        This method, and the ones it calls, (I think/hope) do not re-allocate memory to the data arrays.
+        """Records data, and acts.
+            This method, and the ones it calls, (I think/hope) do not re-allocate memory to the data arrays.
         """
         
         #check elapsed time.
@@ -83,8 +102,12 @@ class SpiderBrain(object):
         else:
             self._dtAgg = 0
         
+        #record data
         self._update_series(dt)
         self._generate_data_over_time()
+        
+        #get action
+        self._act()
     
     def _shift(self, array, shift=1):
         #FIXME 38bgkdlsien this allocates an entire copy. can't want this. need a way to roll without reallocating.
@@ -140,8 +163,7 @@ class SpiderBrain(object):
         xWidth = self.x_timeSeries.shape[1]
         yWidth = self.y_timeSeries.shape[1]
         
-        #multiply the 1s in lookBack rows of x_data by the both time series arrays,
-        #   i.e. assign the timeSeries array to the first lookBack rows of data, and to the xWidth column.
+        #assign the timeSeries array to the first lookBack rows of data, and to the xWidth column.
         self.x_data[0:self.lookBack,0:xWidth] = self.x_timeSeries  # assign x vals
         self.x_data[0:self.lookBack,xWidth:xWidth+1] = self.lookBackColumn # assign time axis vals
         
@@ -149,6 +171,28 @@ class SpiderBrain(object):
         #   this requires adding a dimension to broadcast over the 1s
         self.y_data[0:self.lookBack] = np.expand_dims(self.y_timeSeries[0], 0)
     
+    def _act(self):
+        """Integrates the explorersHQ
+        """
+        #TODO update explorerHQ forward model params if new training received. for now, just have the passed instance be fully trained.
+        
+        #TODO have this come in from the UI, or from more abstract explorerHQs
+        #       this will need to ultimately come from outside, UI or genetics (physiology).
+        #       and trickle down to dependent explorerHQs
+        #update the sensor goal
+        self.explorerHQ.update_sensorGoal(np.array([-0.1]))
+        
+        #update environ info
+        # retrieve the most current situation, but add a filler dimension on the end for the time axis.
+        x = np.hstack((self.x_timeSeries[0], np.array([0])))
+        
+        self.explorerHQ.update_environs_only(x, conIndices=self._controlIndices)
+        
+        #step explorers toward goals.
+        self.explorerHQ.step_explorer()
+        
+        #TODO get the explorer control feature location, and set the node control features to those values.
+        
     def data_to_npz(self, dest):
         """Writes an npz file holding data
         """
