@@ -431,7 +431,27 @@ class ExplorerHQ(object):
         """This should only be used when control features are guaranteed to respond immediately to their set value.
         """
         self.explorers.assign(x)
-
+    def graph_space(self, x):
+        """Takes inputs, and generates the point values for those inputs.
+        """
+        feed_dict = {
+                        #FIXME can't feed variable to placeholder, just make explorers a numpy array. 9dii10289hti
+                        self.forwardRD[self.forwardMapper['x']]:x,
+                        self.forwardRD[self.forwardMapper['xRange']]:self._xRange,
+                        self.forwardRD[self.forwardMapper['sRange']]:self._sRange,
+                        
+                        self.pvRD['sensorGoal']:self._sensorGoal,
+                        self.pvRD['modifier_C']:self._modifiers['C'],
+                        self.pvRD['modifier_T']:self._modifiers['T'],
+                        self.pvRD['modifier_S']:self._modifiers['S']
+                    }
+        #FIXME 9dii10289hti . if not, then explorers can just be a numpy array...either way, it probably should be, i guess.
+        #                        i mean, if we have to say variable.eval() then we should just store it as a numpy array.
+        
+        #evaluate the stepper to step explorers uphill.
+        result = self.pvRD['sess'].run([self.pvRD['V'], self.pvRD['C'], self.pvRD['T'], self.pvRD['S']], feed_dict=feed_dict)
+        
+        return x, result[0], result[1], result[2], result[3]
 
 #---<GMM helpers>---
 def _fix_mvu(m, v, u):

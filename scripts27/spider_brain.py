@@ -174,13 +174,15 @@ class SpiderBrain(object):
     def _act(self):
         """Integrates the explorersHQ
         """
+        #FIXME TODO FIXME TODO this method is currently in a pre-alpha state, and is currently implemented for testing purposes.
+        
         #TODO update explorerHQ forward model params if new training received. for now, just have the passed instance be fully trained.
         
         #TODO have this come in from the UI, or from more abstract explorerHQs
         #       this will need to ultimately come from outside, UI or genetics (physiology).
         #       and trickle down to dependent explorerHQs
         #update the sensor goal
-        self.explorerHQ.update_sensorGoal(np.array([-0.1]))
+        self.explorerHQ.update_sensorGoal(np.array([-0.025]))
         
         #update environ info
         # retrieve the most current situation, but add a filler dimension on the end for the time axis.

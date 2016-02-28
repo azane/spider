@@ -456,10 +456,7 @@ class GaussianMixtureModel(object):
         
         #-----<ANN Construction>-----
         with tf.name_scope('ANN_const') as scope:
-            #two hidden layers
-            
-            print "forward: " + str((inDims, hiddenLayerSize))
-            
+            #two hidden layers            
             w1 = self._weight_variable([inDims, hiddenLayerSize])
             b1 = self._bias_variable([hiddenLayerSize])
             
@@ -719,8 +716,6 @@ class GaussianMixtureModel(object):
         """Return a dictionary of evaluated tensors with evalStr as keys.
             'evalStr' contains a list of strings that act as the reference dictionary keys for the tensors to evaluate.
         """
-        
-        assert self.__graphBuilt, "Graph not built. Build graph."
         
         with self.graph.as_default():
             #use test values as feeds.

@@ -9,7 +9,20 @@ import tensorflow as tf
 
 the xmvu file must have 4 arrays labeled x, m, v, and u, and must meet the asserted requirements in the sample_mixture function.
 """
-
+def _fix_mvu(m, v, u):
+    """Shape mvu coming out of forwardRD so it makes more sense.
+    """
+    
+    # m.shape == (e,g)
+    # v.shape == (e,t)
+    # u.shape == (e,g,t)
+    
+    m = np.expand_dims(m, 2)  # shape == (e,g,1)
+    v = np.expand_dims(v, 1)  # shape == (e,1,t)
+    #u = u  # shape == (e,g,t)
+    
+    return m, v, u
+    
 def sample_mixture(x, m, v, u):
     #x - the inputs [s,x] #these are strictly used to pair with the returned outputs.
     #u - the mean [s,g,t]
@@ -45,6 +58,14 @@ def sample_mixture(x, m, v, u):
         y[i] = premix[i,gSelection]
     
     #print 'y.shape: ' + str(y.shape)
+    
+    return x, y
+
+def mixture_expectation(x, m, v, u):
+    m, v, u = _fix_mvu(m, v, u)
+    
+    #sum over the components.
+    y = np.sum((m*u), axis=1)  # from shape == (s,g,t) to shape == (s,t)
     
     return x, y
 

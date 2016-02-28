@@ -111,18 +111,18 @@ class ConveyorTest(pymunk.Space):
         s_x = s_x[:,xDims]
         t_x = t_x[:,xDims]
         
-        expModel = gmm.GaussianMixtureModel(s_x, s_t, t_x, t_t, numGaussianComponents=15, hiddenLayerSize=20, learningRate=1e-3, buildGraph=False, debug=False)
-        forwardRD = expModel.spi_get_forward_model()
+        self.expModel = gmm.GaussianMixtureModel(s_x, s_t, t_x, t_t, numGaussianComponents=15, hiddenLayerSize=20, learningRate=1e-3, buildGraph=False, debug=False)
+        forwardRD = self.expModel.spi_get_forward_model()
         
-        expHQ = sexp.ExplorerHQ(numExplorers=3, xRange=expModel.inRange, sRange=expModel.outRange, forwardRD=forwardRD,
+        self.expHQ = sexp.ExplorerHQ(numExplorers=3, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
                                 certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
                                 modifiers=dict(C=1., T=1., S=1.))
         
         params = np.load("data/spi_gmm_wb.npz")
-        expHQ.update_params(w1=params['w1'], w2=params['w2'], w3=params['w3'], b1=params['b1'], b2=params['b2'], b3=params['b3'])
+        self.expHQ.update_params(w1=params['w1'], w2=params['w2'], w3=params['w3'], b1=params['b1'], b2=params['b2'], b3=params['b3'])
         #---</temp>---
         
-        self.spi_brain = SpiderBrain(self.spi_spider, expHQ)
+        self.spi_brain = SpiderBrain(self.spi_spider, self.expHQ)
         
         return l
         
