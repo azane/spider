@@ -1,6 +1,12 @@
 import numpy as np
 import tensorflow as tf
 
+#FIXME what if a bimodal, uncertain prediction will yield better results in both modes than one unimodal element?
+
+#FIXME Variable.assign* might need to be evaluated every time for it to take effect. in the explorer case,
+#       we can't overwrite variable with the tensor returned by the assignment, otherwise the variableness is removed,
+#       and nothing can be assigne.d
+
 def softmax(x):
     # from https://gist.github.com/stober/1946926
     e_x = np.exp(x - np.max(x))
@@ -106,6 +112,8 @@ class ExplorerHQ(object):
         self._expectation_func = expectation_func
         
         #this function takes args and sets the trained parameters of the forwardRD
+        #   it should return a list of variable assignment ops that are evaluated with the pv session
+        #    upon their return to this the calling method.
         self._p_update_func = parameter_update_func
         #---</Experiential Model Dependent Functions>---
         
@@ -117,6 +125,9 @@ class ExplorerHQ(object):
         #---<Build TF Graph>---
         #the reference dictionary of point value elements
         self.pvRD = {}
+        
+        #a reference dictionary for test values
+        self.test = {}
         
         #create and drop explorers in the space
         with self.forwardRD[self.forwardMapper['graph']].as_default():
@@ -205,6 +216,9 @@ class ExplorerHQ(object):
         #take size [-1, 1], i.e. all the rows, for that single column.
         gratificationTerm = tf.slice(self.forwardRD[self.forwardMapper['x']], begin=[0,self._gtermIndex], size=[-1, 1])
         
+        #absolute the grat term.
+        gratificationTerm = tf.abs(gratificationTerm)
+        
         #TODO these values need to be exposed to the spider. see https://www.desmos.com/calculator/etoiuwakda for more info.
         #       gratificationTermRange is the abs value of the maximum gratification term likely to be seen.
         #        the values can go beyond that though, and not cause an issue.
@@ -238,9 +252,15 @@ class ExplorerHQ(object):
         s = self._expectation_func(self.forwardRD)
         
         #the squared distance to the goal
-        num = tf.square(self.pvRD['sensorGoal'] - s)
+        num = tf.square(self.pvRD['sensorGoal'] - s)  # .shape == (e, sDim)
         #the difference between the top and the bottom, squared
-        den = tf.square(tf.reduce_sum(self._sRange*np.array([[-1.,1.]], dtype=np.float32), reduction_indices=1))
+        den = tf.square(tf.reduce_sum(self._sRange*np.array([[-1.,1.]], dtype=np.float32), reduction_indices=1))  # .shape == (sDim)
+        den = tf.expand_dims(den, 0)  # .shape == (1,sDim) # for broadcasting over e.
+        
+        self.test['errDen'] = den
+        self.test['errNum'] = num
+        self.test['sensorVal'] = s
+        
         
         err = (num/den)
         
@@ -251,7 +271,10 @@ class ExplorerHQ(object):
         errorLeniency = tf.constant(0.1) #FIXME does this need to be a variable, placeholder?
         
         #NOTE this value will always be between 0-1
-        return tf.exp(-err/errorLeniency)
+        #FIXME return tf.exp(-err/errorLeniency)  # disabled for testing 1820gndksli
+        #return s #FIXME enabled for testing 1820gndksli. this is the sensor expectation.
+        
+        return tf.exp(-err/errorLeniency) # temp reenabled 1820gndksli
         
         
     def _explorer_isolation(self):
@@ -377,9 +400,12 @@ class ExplorerHQ(object):
         #evaluate the stepper to step explorers uphill.
         self.pvRD['sess'].run([self.pvRD['stepper']], feed_dict=feed_dict)
     def update_params(self, *args, **kwargs):
-        """Runs parameter updater for forward model.
+        """Build parameter updating ops for forward model.
         """
-        self._p_update_func(self.forwardRD, *args, **kwargs)
+        assigners = self._p_update_func(self.forwardRD, *args, **kwargs)
+        
+        #evaluate the assigners so the vars get updated
+        self.pvRD['sess'].run(assigners)
         
     def update_environs_only(self, x, envIndices=None, conIndices=None):
         """Update only environmental values in explorer vectors.
@@ -432,7 +458,7 @@ class ExplorerHQ(object):
         """
         self.explorers.assign(x)
     def graph_space(self, x):
-        """Takes inputs, and generates the point values for those inputs.
+        """Takes inputs, and generates the point values for those inputs. Also evaluates ops in self.test
         """
         feed_dict = {
                         #FIXME can't feed variable to placeholder, just make explorers a numpy array. 9dii10289hti
@@ -448,10 +474,25 @@ class ExplorerHQ(object):
         #FIXME 9dii10289hti . if not, then explorers can just be a numpy array...either way, it probably should be, i guess.
         #                        i mean, if we have to say variable.eval() then we should just store it as a numpy array.
         
-        #evaluate the stepper to step explorers uphill.
-        result = self.pvRD['sess'].run([self.pvRD['V'], self.pvRD['C'], self.pvRD['T'], self.pvRD['S']], feed_dict=feed_dict)
+        #evals
+        evals = [self.pvRD['V'], self.pvRD['C'], self.pvRD['T'], self.pvRD['S']]  # list pv elements first.
+        # test evals.
+        evals.extend([
+                        self.test['errDen'],
+                        self.test['errNum'],
+                        self.test['sensorVal'],
+                        
+                        self.forwardRD['w1'],
+                        
+                        self.forwardRD['m'],
+                        self.forwardRD['v'],
+                        self.forwardRD['u']
+                    ])
         
-        return x, result[0], result[1], result[2], result[3]
+        #evaluate
+        result = self.pvRD['sess'].run(evals, feed_dict=feed_dict)
+        
+        return x, result[0], result[1], result[2], result[3], result[4:]
 
 #---<GMM helpers>---
 def _fix_mvu(m, v, u):
@@ -505,16 +546,21 @@ def gmm_expectation(forwardRD):
     m, v, u = _fix_mvu(forwardRD['m'], forwardRD['v'], forwardRD['u'])
     
     #sum over the components.
-    return tf.reduce_sum((m*u), [1])  # from shape == (e,g,t) to shape == (e,t)
+    return tf.reduce_sum((m*u), reduction_indices=[1])  # from shape == (e,g,t) to shape == (e,t)
     
 def gmm_p_updater(forwardRD, w1, b1, w2, b2, w3, b3):
     """Assigns trained parameters to the gmm forward model.
     """
-    forwardRD['w1'].assign(w1)
-    forwardRD['b1'].assign(b1)
-    forwardRD['w2'].assign(w2)
-    forwardRD['b2'].assign(b2)
-    forwardRD['w3'].assign(w3)
-    forwardRD['b3'].assign(b3)
+    #remember, these are ops, not actual assignments.
+    #   so now, when these are evaluated, it will perform the assignment.
+    assigners = [
+        forwardRD['w1'].assign(w1),
+        forwardRD['b1'].assign(b1),
+        forwardRD['w2'].assign(w2),
+        forwardRD['b2'].assign(b2),
+        forwardRD['w3'].assign(w3),
+        forwardRD['b3'].assign(b3)
+    ]
+    return assigners
     
 #---<GMM helpers>---

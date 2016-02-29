@@ -226,6 +226,9 @@ class DeltaX(BaseNode):
         #average over the points, weighting with avgWeights
         f = np.average(self.points, weights=self.avgWeights)
         
+        #TEMP FIXME a temp fix for poor gmm performance on small values.
+        f *= 100
+        
         self._cts_data['sensory'] = np.array([f])
     
 class SpiMuscle(BaseNode):

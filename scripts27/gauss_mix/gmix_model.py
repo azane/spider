@@ -237,7 +237,7 @@ class GaussianMixtureModel(object):
         
             #this is a reference dictionary where tensorflow tensor objects are stored.
             #   it's basically employed to keep the class namespace cleaner, cz there can be looots of tensors.
-            self.refDict = {}
+            self.refDict = {'graph':self.graph}
             
             if buildGraph:
                 self.build_graph()
