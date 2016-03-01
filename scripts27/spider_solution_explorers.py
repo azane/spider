@@ -7,6 +7,11 @@ import tensorflow as tf
 #       we can't overwrite variable with the tensor returned by the assignment, otherwise the variableness is removed,
 #       and nothing can be assigne.d
 
+#FIXME instead of just adding the certainty:
+#       a certaintly bad result is worse than an uncertain bad result. a certainly bad result is the worst thing!
+#       a certainly good result is the best thing! an uncertain good result is better than a certain bad result.
+#       implement this! so...certainty results in better points, the better the sensor value, and worse points the worse.
+
 def softmax(x):
     # from https://gist.github.com/stober/1946926
     e_x = np.exp(x - np.max(x))
@@ -131,9 +136,10 @@ class ExplorerHQ(object):
         
         #create and drop explorers in the space
         with self.forwardRD[self.forwardMapper['graph']].as_default():
-            self.pvRD['sess'] = tf.Session()
-            self.explorers = tf.Variable(tf.zeros([numExplorers, self._xDim]))
-            self.pvRD['sess'].run(tf.initialize_all_variables())
+            #self.pvRD['sess'] = tf.Session()
+            #self.explorers = tf.Variable(tf.zeros([numExplorers, self._xDim]))
+            self.explorers = np.zeros([numExplorers, self._xDim])
+            #self.pvRD['sess'].run(tf.initialize_all_variables())
             self.drop_explorer(range(numExplorers))
         
         #build point value calculation tensors
@@ -187,7 +193,8 @@ class ExplorerHQ(object):
         std = 1/(2*np.sqrt(np.pi)*bigI)
         
         #use the sRange placeholder from the forward RD.
-        absRange = tf.reduce_sum(self.forwardRD[self.forwardMapper['sRange']]*np.array([[-1,1]]), reduction_indices=1)
+        absRange = tf.reduce_sum(self.forwardRD[self.forwardMapper['sRange']]*np.array([[-1,1]]), reduction_indices=1)  # .shape == (sDim)
+        absRange = tf.expand_dims(absRange, 0)  # .shape == (1,sDim) # for broadcasting over e.
         
         #divide the std by the absRange, i.e. return the ratio of the range relevantly covered by the p(x)
         certainty = std/absRange
@@ -230,7 +237,7 @@ class ExplorerHQ(object):
         #        so there's always a chance of higher values.
         #   to be exposed, these will need to be added to self.pvRD
         gratificationTermRange = tf.constant(25.) #TODO infer this from the xRange placeholder in forwardRD?
-        valueRangeEnd = tf.constant(0.001) #FIXME does this need to be a variable, placeholder?
+        valueRangeEnd = tf.constant(0.1) #FIXME does this need to be a variable, placeholder?
         
         #calculate the shaper based on the above values. 
         shaper = -tf.log(valueRangeEnd)/gratificationTermRange
@@ -254,7 +261,7 @@ class ExplorerHQ(object):
         #the squared distance to the goal
         num = tf.square(self.pvRD['sensorGoal'] - s)  # .shape == (e, sDim)
         #the difference between the top and the bottom, squared
-        den = tf.square(tf.reduce_sum(self._sRange*np.array([[-1.,1.]], dtype=np.float32), reduction_indices=1))  # .shape == (sDim)
+        den = tf.square(tf.reduce_sum(self.forwardRD[self.forwardMapper['sRange']]*np.array([[-1.,1.]], dtype=np.float32), reduction_indices=1))  # .shape == (sDim)
         den = tf.expand_dims(den, 0)  # .shape == (1,sDim) # for broadcasting over e.
         
         self.test['errDen'] = den
@@ -319,20 +326,27 @@ class ExplorerHQ(object):
         self.pvRD['modifier_S'] = tf.placeholder(tf.float32, shape=())
         
         c = self.pvRD['modifier_C']*self.pvRD['C']  # shape == (e,s)
-        t = self.pvRD['modifier_T']*self.pvRD['T']  # shape == (e)
+        t = self.pvRD['modifier_T']*self.pvRD['T']  # shape == (e,1)
         s = self.pvRD['modifier_S']*self.pvRD['S']  # shape == (e,s)
+        
+        self.test['modC'] = c
+        self.test['modT'] = t
+        self.test['modS'] = s
         
         #TEMP we'll want a more sophisticated, modifiable way for weighting the value of different sensors.
         c = tf.reduce_mean(c, 1)
+        t = tf.squeeze(t)
         s = tf.reduce_mean(s, 1)
         
-        return c+t+s
+        return c+t+s  # .shape == (e,)
         
         
     def _build_solution_space(self):
         """Calls all the graph building functions and stores in pvRD.
         """
         with self.forwardRD[self.forwardMapper['graph']].as_default():
+            self.pvRD['sess'] = tf.Session()
+            
             self.pvRD['C'] = self._certainty()
             self.pvRD['T'] = self._gratification_term()
             self.pvRD['S'] = self._sensor()
@@ -349,7 +363,8 @@ class ExplorerHQ(object):
         """
         
         #get current explorer positions
-        npExplorers = self.explorers.eval(session=self.pvRD['sess'])
+        #npExplorers = self.explorers.eval(session=self.pvRD['sess'])
+        npExplorers = self.explorers
         
         #generate new drop points in range.
         drop = np.random.random_sample(size=(len(explorerIndices), self._xDim))
@@ -360,7 +375,8 @@ class ExplorerHQ(object):
         npExplorers[explorerIndices] = drop
         
         #reassign positions to tf variable.
-        self.explorers.assign(npExplorers)
+        #self.explorers.assign(npExplorers)
+        self.explorers = npExplorers
         
     def _build_explorer_stepper(self):
         """Returns a tensor that calculates the gradient of the point value and steps the explorers uphill.
@@ -369,23 +385,21 @@ class ExplorerHQ(object):
         
         #FIXME need to find a way to only calculate the gradients of the control features. use tf.dynamic_partition?
         
-        #FIXME 9dii10289hti ...i don't know how to to integrate the explorers...
-        #       so i guess for now, we'll just calculate the gradient with respect to x.
-        #       but i'm not sure you can calculate a gradient with respect to a placeholder?
-        #calculate the gradient of the point values given explorer/x locations.
-        explorerGrads = tf.gradients(self.pvRD['V'], [self.forwardRD[self.forwardMapper['x']]])
+        explorerGrads = tf.gradients(self.pvRD['V'], self.forwardRD[self.forwardMapper['x']])
         
         #TODO expose this to the spider. make it a variable so it can change.
-        rate = 1.
+        rate = 1e-1
         
-        return self.explorers.assign_add(explorerGrads[0]*rate)
+        #return the rated gradients for addition to explorers
+        return explorerGrads[0]*rate
     
     def step_explorer(self):
         """Evaluates the explorer stepper tensor to step explorers uphill.
         """
+        
         feed_dict = {
-                        #FIXME can't feed variable to placeholder, just make explorers a numpy array. 9dii10289hti
-                        self.forwardRD[self.forwardMapper['x']]:self.explorers.eval(session=self.pvRD['sess']),
+                        
+                        self.forwardRD[self.forwardMapper['x']]:self.explorers,
                         self.forwardRD[self.forwardMapper['xRange']]:self._xRange,
                         self.forwardRD[self.forwardMapper['sRange']]:self._sRange,
                         
@@ -394,11 +408,23 @@ class ExplorerHQ(object):
                         self.pvRD['modifier_T']:self._modifiers['T'],
                         self.pvRD['modifier_S']:self._modifiers['S']
                     }
-        #FIXME 9dii10289hti . if not, then explorers can just be a numpy array...either way, it probably should be, i guess.
-        #                        i mean, if we have to say variable.eval() then we should just store it as a numpy array.
-        
         #evaluate the stepper to step explorers uphill.
-        self.pvRD['sess'].run([self.pvRD['stepper']], feed_dict=feed_dict)
+        
+        #results = self.pvRD['sess'].run([self.pvRD['stepper']], feed_dict=feed_dict)[0]
+        results = self.pvRD['sess'].run([self.pvRD['stepper'], self.pvRD['V']], feed_dict=feed_dict)
+        
+        self.explorers += results[0]
+        
+        if not hasattr(self, '_explorerSeries'):
+            self._explorerSeries = []
+        if not hasattr(self, '_explorerGrads'):
+            self._explorerGrads = []
+        if not hasattr(self, '_explorerVals'):
+            self._explorerVals = []
+        self._explorerSeries.append(np.copy(self.explorers))
+        self._explorerGrads.append(results[0])
+        self._explorerVals.append(results[1])
+        
     def update_params(self, *args, **kwargs):
         """Build parameter updating ops for forward model.
         """
@@ -420,10 +446,15 @@ class ExplorerHQ(object):
         
         #NOTE: remember that explorers only move a little bit each time, but they chase maximums that move slowly as well.
         #       if their position is overwritten, then they may lose progress on the maximum they are chasing.
+        #        also, if they are overwritten with current control features, then they will all be forced to one position.
         #       remember that the actual control feature settings are not necessarily considered by explorers.
         #       their position is considered. if the actual control feature setting is deemed helpful, then it should
         #       be recorded as a node as well.
         #       FIXME 18691019djdks i think this means that the nodes should not bother returning the values of their control features.
+        
+        #FIXME verify that x is the right shape for explorers
+        assert x.shape == self.explorers.shape[1:]
+        
         
         #create base partition array
         ePartition = np.zeros(self._xDim)
@@ -445,18 +476,17 @@ class ExplorerHQ(object):
         #get environs from x
         environs = x[ePartition]
         
-        #get numpy explorers from tf variable
-        explorers = self.explorers.eval(session=self.pvRD['sess'])
+        print "environs"
+        print environs
         
-        #set environmental features on all explorers
-        explorers[:,ePartition] = environs
+        print "pre set, explorers"
+        print self.explorers
         
-        self.explorers.assign(explorers)
+        self.explorers[:,ePartition] = environs
         
-    def update_all(self, x):
-        """This should only be used when control features are guaranteed to respond immediately to their set value.
-        """
-        self.explorers.assign(x)
+        print "post set, explorers"
+        print self.explorers
+        
     def graph_space(self, x):
         """Takes inputs, and generates the point values for those inputs. Also evaluates ops in self.test
         """
@@ -486,8 +516,15 @@ class ExplorerHQ(object):
                         
                         self.forwardRD['m'],
                         self.forwardRD['v'],
-                        self.forwardRD['u']
+                        self.forwardRD['u'],
+                        
+                        self.test['modC'],
+                        self.test['modT'],
+                        self.test['modS']
                     ])
+        
+        print "modifiers: "
+        print self._modifiers
         
         #evaluate
         result = self.pvRD['sess'].run(evals, feed_dict=feed_dict)

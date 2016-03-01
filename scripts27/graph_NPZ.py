@@ -75,7 +75,7 @@ def graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sb
     cb.set_label("y")
     #---</Plotting>---
     
-    return fig, scatPlot
+    return fig, [scatPlot, ax]
 
 
 if __name__ == '__main__':
