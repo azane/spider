@@ -110,9 +110,9 @@ class ConveyorTest(pymunk.Space):
         self.expModel = gmm.GaussianMixtureModel(s_x, s_t, t_x, t_t, numGaussianComponents=15, hiddenLayerSize=20, learningRate=1e-3, buildGraph=False, debug=False)
         forwardRD = self.expModel.spi_get_forward_model()
         
-        self.expHQ = sexp.ExplorerHQ(numExplorers=3, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
+        self.expHQ = sexp.ExplorerHQ(numExplorers=7, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
                                 certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
-                                modifiers=dict(C=.2, T=.2, S=1.))
+                                modifiers=dict(C=.3, T=.01, S=.69))
         
         params = np.load("data/spi_gmm_wb.npz")
         self.expHQ.update_params(w1=params['w1'], w2=params['w2'], w3=params['w3'], b1=params['b1'], b2=params['b2'], b3=params['b3'])
@@ -142,13 +142,15 @@ class ConveyorTest(pymunk.Space):
             #get data, and add to it, but tanh it and divide by 2 to keep within -.5,.5
             #also, make additions be random so we get a good spread on the data.
             data = m2.get_data()
-            r = np.random.uniform(0.1)
-            m2.set_control_features(np.tanh(data['control'] - r)/2.)
-            #NOTE: along these lines...should nodes be responsible for limiting their control features? probably yes.
+            r = np.random.uniform(0.05)
+            m2.set_control_features(data['control'] - r)  # shorten
         elif self.spi_keys[key.L]:
             data = m2.get_data()
-            r = np.random.uniform(0.1)
-            m2.set_control_features(np.tanh(data['control'] + r)/2.)
+            r = np.random.uniform(0.05)
+            m2.set_control_features(data['control'] + r)  # lengthen
+        elif self.spi_keys[key.K]:
+            data = m2.get_data()
+            m2.set_control_features(data['control']*0.75)  # move toward 0, original length
             
         if self.spi_keys[key.SPACE]:
             #self.spi_brain.series_to_csv(dest="data/foo.csv",columns=[0,1])

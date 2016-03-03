@@ -17,7 +17,7 @@ def cull_range(x, y, low, high, i=-1):
     indices = np.where((y[:,i] >= low) & (y[:,i] <= high))
     return x[indices], y[indices]
 
-def graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sbpltLoc=111, numPoints=1000):
+def graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sbpltLoc=111, numPoints=1000, **kwargs):
     """Takes two 2d arrays, but only graphs the 
         3 columns of x, and 1 column of y."""
     #---<Error Catching>---
@@ -64,7 +64,7 @@ def graph3x1y(x, y, xCols=[0,1,-1], yCol=-1, yLow=None, yHigh=None, fig=None, sb
                             x[:,xCols[0]],
                             x[:,xCols[1]],
                             x[:,xCols[2]],
-                        c=y[:,yCol]) #create plot
+                        c=y[:,yCol], **kwargs) #create plot
     
     ax.set_xlabel("x1")
     ax.set_ylabel("x2")

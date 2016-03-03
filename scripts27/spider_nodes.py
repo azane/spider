@@ -279,7 +279,12 @@ class SpiMuscle(BaseNode):
         #       although, it does make sense to have '0' be the middle ground?
         #       ...we could do both? have the brain be able to handle scaling, but have control features scale from (-1,1)?
         #       perhaps it does really make sense for this node in particular. but for others, maybe not. so both it is!?
-        self.muscle.rest_length = (self._cts_data['control'][0] + 1)*self.originalLength
+        #   yes, because nodes are responsible for providing 'real world' limitations. the brain is responsible for discovering the futility of setting
+        #       control features to values that won't make the node respond any more.
+        #self.muscle.rest_length = (self._cts_data['control'][0] + 1)*self.originalLength
+        olMultiplier = np.tanh(self._cts_data['control'][0])/3  # keep within -0.5 and 0.5
+        olMultiplier += 1.  # add one so the multiplier is between 0.5 and 1.5
+        self.muscle.rest_length = olMultiplier*self.originalLength
         
 
 class BalanceNode(BaseNode):

@@ -207,7 +207,7 @@ class ExplorerHQ(object):
         #       this modifies the steepness of the exp(). see https://www.desmos.com/calculator/etoiuwakda
         #       0>this<1. lower values are stricter, 'tighter' against the y axis.
         #   to be exposed, this will need to be added to self.pvRD
-        certaintyLeniency = tf.constant(0.1) #FIXME does this need to be a variable, placeholder?
+        certaintyLeniency = tf.constant(0.25) #FIXME does this need to be a variable, placeholder?
         
         #NOTE: this value will always be between 0-1
         return tf.exp(-certainty/certaintyLeniency)
@@ -325,9 +325,11 @@ class ExplorerHQ(object):
         self.pvRD['modifier_T'] = tf.placeholder(tf.float32, shape=())
         self.pvRD['modifier_S'] = tf.placeholder(tf.float32, shape=())
         
-        c = self.pvRD['modifier_C']*self.pvRD['C']  # shape == (e,s)
+        #c = self.pvRD['modifier_C']*self.pvRD['C']  # shape == (e,s)
+        c = (1 - self.pvRD['modifier_C'])*self.pvRD['C']  # shape == (e,s)
         t = self.pvRD['modifier_T']*self.pvRD['T']  # shape == (e,1)
-        s = self.pvRD['modifier_S']*self.pvRD['S']  # shape == (e,s)
+        #s = self.pvRD['modifier_S']*self.pvRD['S']  # shape == (e,s)
+        s = (1 - self.pvRD['modifier_S'])*self.pvRD['S']  # shape == (e,s)
         
         self.test['modC'] = c
         self.test['modT'] = t
@@ -338,7 +340,8 @@ class ExplorerHQ(object):
         t = tf.squeeze(t)
         s = tf.reduce_mean(s, 1)
         
-        return c+t+s  # .shape == (e,)
+        #return c+t+s  # .shape == (e,)
+        return c*s+t
         
         
     def _build_solution_space(self):
@@ -411,19 +414,24 @@ class ExplorerHQ(object):
         #evaluate the stepper to step explorers uphill.
         
         #results = self.pvRD['sess'].run([self.pvRD['stepper']], feed_dict=feed_dict)[0]
-        results = self.pvRD['sess'].run([self.pvRD['stepper'], self.pvRD['V']], feed_dict=feed_dict)
         
-        self.explorers += results[0]
-        
-        if not hasattr(self, '_explorerSeries'):
-            self._explorerSeries = []
-        if not hasattr(self, '_explorerGrads'):
-            self._explorerGrads = []
-        if not hasattr(self, '_explorerVals'):
-            self._explorerVals = []
-        self._explorerSeries.append(np.copy(self.explorers))
-        self._explorerGrads.append(results[0])
-        self._explorerVals.append(results[1])
+        for i in range(5):
+            results = self.pvRD['sess'].run([self.pvRD['stepper'], self.pvRD['V']], feed_dict=feed_dict)
+            
+            self.explorers += results[0]
+            
+            if not hasattr(self, '_explorerSeries'):
+                self._explorerSeries = []
+            if not hasattr(self, '_explorerGrads'):
+                self._explorerGrads = []
+            if not hasattr(self, '_explorerVals'):
+                self._explorerVals = []
+            if not hasattr(self, '_explorerBest'):
+                self._explorerBest = []
+            self._explorerSeries.append(np.copy(self.explorers))
+            self._explorerGrads.append(results[0])
+            self._explorerVals.append(results[1])
+            self._explorerBest.append(np.copy(self.explorers[np.argmax(self._explorerVals[-1])]))
         
     def update_params(self, *args, **kwargs):
         """Build parameter updating ops for forward model.
@@ -476,16 +484,7 @@ class ExplorerHQ(object):
         #get environs from x
         environs = x[ePartition]
         
-        print "environs"
-        print environs
-        
-        print "pre set, explorers"
-        print self.explorers
-        
         self.explorers[:,ePartition] = environs
-        
-        print "post set, explorers"
-        print self.explorers
         
     def graph_space(self, x):
         """Takes inputs, and generates the point values for those inputs. Also evaluates ops in self.test
@@ -522,9 +521,6 @@ class ExplorerHQ(object):
                         self.test['modT'],
                         self.test['modS']
                     ])
-        
-        print "modifiers: "
-        print self._modifiers
         
         #evaluate
         result = self.pvRD['sess'].run(evals, feed_dict=feed_dict)
