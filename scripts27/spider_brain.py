@@ -184,7 +184,7 @@ class SpiderBrain(object):
         #       this will need to ultimately come from outside, UI or genetics (physiology).
         #       and trickle down to dependent explorerHQs
         #update the sensor goal
-        self.explorerHQ.update_sensorGoal(np.array([-0.8]))
+        self.explorerHQ.update_sensorGoal(np.array([-0.15]))
         
         #update environ info
         # retrieve the most current situation, but add a filler dimension on the end for the time axis.

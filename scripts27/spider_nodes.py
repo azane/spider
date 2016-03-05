@@ -139,7 +139,6 @@ class BaseNode(object):
             raise ValueError("The input control array must be array like and convertible to float64.")
         assert control_array.shape == (self.__controlSize,), "The input control array does not match the size defined during construction."
         
-        #in place mods
         self._cts_data['control'] = control_array
         
     
@@ -186,7 +185,7 @@ class BaseNode(object):
 class DeltaX(BaseNode):
     """The goal of this node is merely to track a moving average of DeltaX over a period.
     """
-    def __init__(self, anchorBodies, anchorPoints, shapeGroup, mavgPeriod=25, mavgPoints=100, **kwargs):
+    def __init__(self, anchorBodies, anchorPoints, shapeGroup, mavgPeriod=100, mavgPoints=200, **kwargs):
         super(DeltaX, self).__init__(anchorBodies, anchorPoints, shapeGroup, numAnchors=1, **kwargs)
         
         self.points = np.zeros(mavgPoints)

@@ -107,12 +107,12 @@ class ConveyorTest(pymunk.Space):
         s_x, s_t = gmm.get_xt_from_npz("data/spi_data.npz")
         t_x, t_t = gmm.get_xt_from_npz("data/spi_data.npz")
         
-        self.expModel = gmm.GaussianMixtureModel(s_x, s_t, t_x, t_t, numGaussianComponents=15, hiddenLayerSize=20, learningRate=1e-3, buildGraph=False, debug=False)
+        self.expModel = gmm.GaussianMixtureModel(s_x, s_t, t_x, t_t, numGaussianComponents=20, hiddenLayerSize=25, learningRate=1e-3, buildGraph=False, debug=False)
         forwardRD = self.expModel.spi_get_forward_model()
         
-        self.expHQ = sexp.ExplorerHQ(numExplorers=10, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
+        self.expHQ = sexp.ExplorerHQ(numExplorers=20, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
                                 certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
-                                modifiers=dict(C=.01, T=.01, S=1.))
+                                modifiers=dict(C=.01, T=.1, S=1.))
         
         self.spi_brain = SpiderBrain(self.spi_spider, self.expHQ)
         #FIXME 89991jdkdlsnhj1h1 build exploration graph here for now. move to spider eventually.
@@ -141,21 +141,34 @@ class ConveyorTest(pymunk.Space):
             
         #if self.spi_keys[key.K]:
         #    m2.set_control_features(np.array([0.]))
-        if self.spi_keys[key.J]:
-            #get data, and add to it, but tanh it and divide by 2 to keep within -.5,.5
-            #also, make additions be random so we get a good spread on the data.
-            data = m2.get_data()
-            r = np.random.uniform(0.05)
-            m2.set_control_features(data['control'] - r)  # shorten
-        elif self.spi_keys[key.L]:
-            data = m2.get_data()
-            r = np.random.uniform(0.05)
-            m2.set_control_features(data['control'] + r)  # lengthen
-        elif self.spi_keys[key.K]:
-            data = m2.get_data()
-            m2.set_control_features(data['control']*0.75)  # move toward 0, original length
+        if self.spi_keys[key.C]:
+            #human controlled while C is pressed
+            if self.spi_keys[key.J]:
+                #get data, and add to it, but tanh it and divide by 2 to keep within -.5,.5
+                #also, make additions be random so we get a good spread on the data.
+                data = m2.get_data()
+                r = np.random.uniform(0.05)
+                m2.set_control_features(data['control'] - r)  # shorten
+            elif self.spi_keys[key.L]:
+                data = m2.get_data()
+                r = np.random.uniform(0.05)
+                m2.set_control_features(data['control'] + r)  # lengthen
+            elif self.spi_keys[key.K]:
+                data = m2.get_data()
+                m2.set_control_features(data['control']*0.75)  # move toward 0, original length
+        
+            if not hasattr(self, '_written'):
+                self._written = False
+        
+            if self.spi_keys[key.SPACE]:
+                if not self._written:
+                    self._written = True
+                    #self.spi_brain.series_to_csv(dest="data/foo.csv",columns=[0,1])
+                    self.spi_brain.data_to_npz(dest="data/spi_data.npz")
             
-        if self.spi_keys[key.SPACE]:
-            #self.spi_brain.series_to_csv(dest="data/foo.csv",columns=[0,1])
-            self.spi_brain.data_to_npz(dest="data/spi_data.npz")
+        else:
+            #FIXME TODO have the brain implement this control when the exploration model is stored there.
+            if hasattr(self.expHQ, '_explorerVals'):
+                bestExplorer = np.copy(self.expHQ.explorers[np.argmax(self.expHQ._explorerVals[-1])])
+                m2.set_control_features([bestExplorer[0]])
             

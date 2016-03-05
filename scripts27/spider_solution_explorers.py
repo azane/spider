@@ -310,7 +310,7 @@ class ExplorerHQ(object):
         
         #TODO i think this will need to be a covariance matrix, taking values only on the diagonal,
         #   but that scales with the range of the control features.
-        isolationWidth = tf.constant(30., dtype=tf.float32)
+        isolationWidth = tf.constant(100., dtype=tf.float32)
         
         #make a unique placeholder.
         assert self.explorers.shape[0] < 500, "Don't run the isolation gradients with over 500 explorers. You can change this limit if you want."
@@ -541,9 +541,11 @@ class ExplorerHQ(object):
             #FIXME reading the previous gradient will be inaccurate for just dropped explorers.
             
             if explorerValue[t_half:].size > 0:
-                #drop three lowest.
-                rg_worstIndex = explorerValue[t_half:].argsort()[:3]#np.argmin(explorerValue[t_half:])
-                self.drop_explorer(rg_worstIndex)
+                #drop lowest
+                rg_worstIndex = np.argmin(explorerValue[t_half:])
+                self.drop_explorer([rg_worstIndex])
+        
+        #TODO this should return the best explorer position.
         
     def update_params(self, *args, **kwargs):
         """Build parameter updating ops for forward model.

@@ -52,7 +52,7 @@ testMuscles = [
 testNodes = [
                 #[bone index at the end of which the node will be, "the type", {kwargs}] #FIXME kwargs should probably be generalized a little more?
                 [0, "balance", {}], #the balance node
-                [0, "deltax", {"mavgPeriod":450, "mavgPoints":225}] #the velocity tracking node
+                [5, "deltax", {"mavgPeriod":2000, "mavgPoints":500}] #the velocity tracking node
             ]
 
 class SpiderPhysiology(object):
