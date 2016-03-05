@@ -1,4 +1,5 @@
 import numpy as np
+import os as os
 
 class SpiderBrain(object):
     def __init__(self, physiology, explorerHQ):
@@ -19,12 +20,12 @@ class SpiderBrain(object):
         
         #the number of points generated for each moment. i.e. the distance along the time axis data is generated.
         #   TODO we might want to consider lookBack as a max, over which we cast the sensor over n, but at increasing intervals (log probs) as max is approached
-        self.lookBack = 25
+        self.lookBack = 100
         #this is the column that will attached to the new data entries to mark the time axis.
         self.lookBackColumn = np.expand_dims(np.arange(self.lookBack)*-1., 1)
         
         #the interval at which the current time step, cts, is updated.
-        self.stepInterval = 0.05
+        self.stepInterval = 0.01
         
         #delta time aggregated, the counter
         self._dtAgg = 0
@@ -77,6 +78,7 @@ class SpiderBrain(object):
         controlIndices.append(xWidth)
         
         self._controlIndices = np.array(controlIndices)
+        self.explorerHQ.update_controlIndices(self._controlIndices)
         
         #Use np.zeros, defaulting to float dtype, so in-place modification can occur.
         #create empty time series arrays using the specified series size, and inferred widths.
@@ -182,13 +184,13 @@ class SpiderBrain(object):
         #       this will need to ultimately come from outside, UI or genetics (physiology).
         #       and trickle down to dependent explorerHQs
         #update the sensor goal
-        self.explorerHQ.update_sensorGoal(np.array([-1.7]))
+        self.explorerHQ.update_sensorGoal(np.array([-0.8]))
         
         #update environ info
         # retrieve the most current situation, but add a filler dimension on the end for the time axis.
         x = np.hstack((self.x_timeSeries[0], np.array([0])))
         
-        self.explorerHQ.update_environs_only(x, conIndices=self._controlIndices)
+        self.explorerHQ.update_environs_only(x)
         
         #step explorers toward goals.
         self.explorerHQ.step_explorer()
@@ -198,5 +200,17 @@ class SpiderBrain(object):
     def data_to_npz(self, dest):
         """Writes an npz file holding data
         """
-        np.savez(dest, x=self.x_data, y=self.y_data)
+        if os.path.isfile(dest):
+            existing = np.load(dest)
+            try:
+                if (existing['x'].shape[1:] == self.x_data.shape[1:]) and (existing['y'].shape[1:] == self.y_data.shape[1:]):
+                    plus_x = np.vstack((existing['x'], self.x_data))
+                    plus_y = np.vstack((existing['y'], self.y_data))
+                    np.savez(dest, x=plus_x, y=plus_y)
+                else:
+                    raise EnvironmentError(str(dest) + " contains incompatible spider data for appending. Move or delete it.")
+            except KeyError:
+                raise EnvironmentError(str(dest) + " is not a spider data file. Move or delete it.")
+        else:
+            np.savez(dest, x=self.x_data, y=self.y_data)
     

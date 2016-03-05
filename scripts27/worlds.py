@@ -110,15 +110,18 @@ class ConveyorTest(pymunk.Space):
         self.expModel = gmm.GaussianMixtureModel(s_x, s_t, t_x, t_t, numGaussianComponents=15, hiddenLayerSize=20, learningRate=1e-3, buildGraph=False, debug=False)
         forwardRD = self.expModel.spi_get_forward_model()
         
-        self.expHQ = sexp.ExplorerHQ(numExplorers=7, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
+        self.expHQ = sexp.ExplorerHQ(numExplorers=10, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
                                 certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
-                                modifiers=dict(C=.3, T=.01, S=.69))
+                                modifiers=dict(C=.01, T=.01, S=1.))
+        
+        self.spi_brain = SpiderBrain(self.spi_spider, self.expHQ)
+        #FIXME 89991jdkdlsnhj1h1 build exploration graph here for now. move to spider eventually.
+        self.expHQ._build_solution_space()
         
         params = np.load("data/spi_gmm_wb.npz")
         self.expHQ.update_params(w1=params['w1'], w2=params['w2'], w3=params['w3'], b1=params['b1'], b2=params['b2'], b3=params['b3'])
-        #---</temp>---
         
-        self.spi_brain = SpiderBrain(self.spi_spider, self.expHQ)
+        #---</temp>---
         
         return l
         

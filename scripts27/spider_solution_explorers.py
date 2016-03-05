@@ -37,7 +37,7 @@ class ExplorerHQ(object):
     
     #TODO if using a web server, maybe receive a pickled reference dict of the forward graph?
     def __init__(self, numExplorers, xRange, sRange, forwardRD, certainty_func, expectation_func, parameter_update_func,
-                    sensorGoal=None, modifiers=None, forwardMapper=None):
+                    sensorGoal=None, modifiers=None, forwardMapper=None, controlIndices=None):
         super(ExplorerHQ, self).__init__()
         
         #---<Forward Mapper>---
@@ -125,6 +125,8 @@ class ExplorerHQ(object):
         #---<Misc>---
         #temp? assume that the gratification term is the last input.
         self._gtermIndex = (self._xDim - 1)
+        
+        self.update_controlIndices(controlIndices)
         #---</Misc>---
         
         #---<Build TF Graph>---
@@ -144,14 +146,24 @@ class ExplorerHQ(object):
         
         #build point value calculation tensors
         #   fill pvRD
-        self._build_solution_space()
+        #FIXME 89991jdkdlsnhj1h1 spider brain needs to initalize this class after it's figured out its nodes.
+        #       for now, worlds is doing it, but that means this has to be called after spider has initialized and this class has.
+        #self._build_solution_space()
         #---</Build TF Graph>---
+    
+    def update_controlIndices(self, controlIndices):
+        """Updates the controlIndice array.
+        """
+        if controlIndices is not None:
+            assert controlIndices.ndim == 1
+            assert controlIndices.dtype == int
+        self._controlIndices = controlIndices
         
     def update_sensorGoal(self, sensorGoal):
         """Updates sensorGoal attribute after verification
         """
         assert sensorGoal.shape == self._sensorGoal.shape
-        assert sensorGoal.dtype == sensorGoal.dtype
+        assert sensorGoal.dtype == self._sensorGoal.dtype
         self._sensorGoal = sensorGoal
     
     def update_modifiers(self, modifiers):
@@ -285,33 +297,55 @@ class ExplorerHQ(object):
         
         
     def _explorer_isolation(self):
-        #TODO create a mixture model of isotropically varying gaussians with means on the explorers.
-        #       this will create an 'error' function that encourages explorers to travel away from each other.
-        #       and will generally increase the uniqueness of solutions.
+        """Build a tensor that is exponentially steep where explorers are concentrated.
+            This should never be evaluated with lots of explorers.
+        """
+        #NOTE: tensorflow indexing SUCKS. such a pain. AADSFHEOIPHEFOPUHAEFJBADSH #disabled 1928tskdhslj
+        #print "fullControlIndices tensor shape: " + str([None, self._controlIndices.shape[0]])
+        #self.pvRD['fullControlIndices'] = tf.placeholder(tf.int32, shape=[None, self._controlIndices.shape[0]])  # .shape == (e,numCF)
+        ##gather using a non-broadcasting index. i couldn't just transpose and gather for some reason, it messed up the None shape in the placeholder?
+        #conIns = tf.gather(self.forwardRD[self.forwardMapper['x']], self.pvRD['fullControlIndices'])
+        #self.pvRD['conInputs'] = conIns  # store for later gradient testing.
         
-        #what if a grid approach is used, where explorers are made to stay in their grid?
         
-        #what if an explorers 'grid' is simply a gaussian with mean of their initial drop?
+        #TODO i think this will need to be a covariance matrix, taking values only on the diagonal,
+        #   but that scales with the range of the control features.
+        isolationWidth = tf.constant(30., dtype=tf.float32)
         
-        #also....i think we would only need one mixture function of positional gaussians.
-        #   because, if each explorer sits perfectly atop their gaussian, the gradient with respect to their position will be 0.
-        #   in other words, only other explorers can actually affect the gradient of this value, as only other explorer's gaussians
-        #   will have means not centered on the explorer in question!
+        #make a unique placeholder.
+        assert self.explorers.shape[0] < 500, "Don't run the isolation gradients with over 500 explorers. You can change this limit if you want."
+        self.pvRD['explorers_for_isolation'] = tf.placeholder(tf.float32, shape=[self.explorers.shape[0], self._xDim])  # .shape == (e,xDim)
+        X_r = tf.expand_dims(self.pvRD['explorers_for_isolation'], 0)  # .shape == (1,e,xDim)
+        X_c = tf.expand_dims(self.pvRD['explorers_for_isolation'], 1)  # .shape == (e,1,xDim)
         
-        #also, this isn't a probability distribution, so it doesn't have to sum to one. what if we square mixture?
-        #   so that if two explorers pile up on each other, then that point is exponentially less favorable to other explorers.
+        #calculate the euclidian distance between 'centers'
+        #FIXME start out with abs, as i think the matrix square doesn't guarantee all positive?
+        diffs = tf.abs(X_r - X_c)  # .shape == (e,e,xDim)
         
-        #what would we put as the variance? we'd use a diagonal, as we want the variance isotropic, i.e. centered in all directions.
-        #   actually....maybe it shouldn't be centered? but "centered" if the ranges were normalized?
-        #   yup. that's it.
-        #   a mixture of gaussians, centered on each explorer, with their covariance such that the gaussian spreads over each x dimension at the same
-        #    fraction of that x dimension's range.
-        #   the magnitute of the covariance then, should be determined by the number of explorers and the dimensionality.
-        #       so, 2 explorers on 1 dimension, would have a standard deviation of 1/4 of the range, so each covers half of the space?
-        #       2 explorers in 2 dimensions, would have a standard deviation...
+        self.test['diffs'] = diffs
         
-        #but how does this fit into the other point value elements? should the 
-        pass
+        #FIXME is it supposed to be (e,e,xDim) times its transpose, or (e,xDim,e) times its transpose?
+        diffs_T = tf.transpose(diffs, perm=[0,2,1])  # .shape == (e,xDim,e)
+        unSummed = tf.batch_matmul(diffs, diffs_T)  # .shape == (e,e,e)
+        
+        self.test['unSummed'] = unSummed
+        
+        #don't sqrt this, as we'd square it in the eCurve anyway.
+        #FIXME 18250dksh not the best method i think...but add 1e-10 to keep it from being 0, cz e^-0 is inf.
+        distSqrd = tf.reduce_sum(unSummed, reduction_indices=2)+1e-5  # .shape == (e,e)
+        
+        self.test['distSqrd'] = distSqrd
+        
+        eCurve_unProd = 1. + tf.exp(-(distSqrd)/(2.*tf.square(isolationWidth)))  # .shape == (e,e)
+        #eCurve_unSum = tf.exp(-(distSqrd)/(2.*tf.square(isolationWidth)))  # .shape == (e,e)
+        
+        self.test['eCurve_unProd'] = eCurve_unProd
+        
+        eCurve = tf.reduce_prod(eCurve_unProd, reduction_indices=1) - 1.  # .shape == (e,)
+        #eCurve = tf.reduce_sum(eCurve_unSum, reduction_indices=1)  # .shape == (e,)
+        
+        return eCurve
+        
     def _full_pointValue(self):
         """Return a tensor calculating the full point value.
             The derivative at explorer positions with respect to this value will determine their step direction.
@@ -325,11 +359,11 @@ class ExplorerHQ(object):
         self.pvRD['modifier_T'] = tf.placeholder(tf.float32, shape=())
         self.pvRD['modifier_S'] = tf.placeholder(tf.float32, shape=())
         
-        #c = self.pvRD['modifier_C']*self.pvRD['C']  # shape == (e,s)
-        c = (1 - self.pvRD['modifier_C'])*self.pvRD['C']  # shape == (e,s)
+        c = self.pvRD['modifier_C']*self.pvRD['C']  # shape == (e,s)
+        #c = (1 - self.pvRD['modifier_C'])*self.pvRD['C']  # shape == (e,s)
         t = self.pvRD['modifier_T']*self.pvRD['T']  # shape == (e,1)
-        #s = self.pvRD['modifier_S']*self.pvRD['S']  # shape == (e,s)
-        s = (1 - self.pvRD['modifier_S'])*self.pvRD['S']  # shape == (e,s)
+        s = self.pvRD['modifier_S']*self.pvRD['S']  # shape == (e,s)
+        #s = (1 - self.pvRD['modifier_S'])*self.pvRD['S']  # shape == (e,s)
         
         self.test['modC'] = c
         self.test['modT'] = t
@@ -340,8 +374,8 @@ class ExplorerHQ(object):
         t = tf.squeeze(t)
         s = tf.reduce_mean(s, 1)
         
-        #return c+t+s  # .shape == (e,)
-        return c*s+t
+        return c+t+s  # .shape == (e,)
+        #return c*s+t
         
         
     def _build_solution_space(self):
@@ -354,8 +388,9 @@ class ExplorerHQ(object):
             self.pvRD['T'] = self._gratification_term()
             self.pvRD['S'] = self._sensor()
             self.pvRD['V'] = self._full_pointValue()
+            self.pvRD['I'] = self._explorer_isolation()
             
-            self.pvRD['stepper'] = self._build_explorer_stepper()
+            self.pvRD['reportGrad'], self.pvRD['crawlGrad'], self.pvRD['isolationGrad'] = self._build_explorer_stepper()
             
             self.pvRD['sess'].run(tf.initialize_all_variables())
         
@@ -386,26 +421,52 @@ class ExplorerHQ(object):
             This also needs to integrate the explorers variable into the x placeholder process.
         """
         
-        #FIXME need to find a way to only calculate the gradients of the control features. use tf.dynamic_partition?
+        #FIXME kdngio129fgs need to find a way to only calculate the gradients of the control features. use tf.dynamic_partition?
         
-        explorerGrads = tf.gradients(self.pvRD['V'], self.forwardRD[self.forwardMapper['x']])
+        firstGrad = tf.gradients(self.pvRD['V'], self.forwardRD[self.forwardMapper['x']])
+        secondGrad = tf.gradients(firstGrad[0], self.forwardRD[self.forwardMapper['x']])
+        
+        #we can't do this method on the above? because the gradients depend on the x values of the environment features
+        isolationGrad = tf.gradients(self.pvRD['I'], self.pvRD['explorers_for_isolation'])
+        #isolationGrad = self.pvRD['I']
         
         #TODO expose this to the spider. make it a variable so it can change.
-        rate = 1e-1
+        rate = 3.
         
         #return the rated gradients for addition to explorers
-        return explorerGrads[0]*rate
+        #   the explorers should crawl along the second, and report their vectors along the first.
+        #   TEMP? trying out two kinds of explorers, so *rate both.
+        return (firstGrad[0]*rate), (secondGrad[0]*rate), (isolationGrad[0]*rate)
     
     def step_explorer(self):
         """Evaluates the explorer stepper tensor to step explorers uphill.
         """
         
+        #FIXME 39ndkslwo make conIndices a class attribute
+        
+        #FIXME just use attribute in this method.
+        conIndices = self._controlIndices
+        
+        #get full controlIndex, non broadcasting.  #FIXME disabled 1928tskdhslj
+        #   make empty array
+        #fullControlIndices = np.zeros((self.explorers.shape[0], self._controlIndices.shape[0]), dtype=int)
+        #   fill all rows with control indices
+        #fullControlIndices[:] = self._controlIndices
+        
+        #print "fullControlIndices.shape " + str(fullControlIndices.shape)
+        #print "self._controlIndices.shape " + str(self._controlIndices.shape)
+        #print "self.explorers.shape " + str(self.explorers.shape)
+        #print
+        #end disabled 1928tskdhslj
+        
         feed_dict = {
                         
                         self.forwardRD[self.forwardMapper['x']]:self.explorers,
+                        self.pvRD['explorers_for_isolation']:self.explorers,
                         self.forwardRD[self.forwardMapper['xRange']]:self._xRange,
                         self.forwardRD[self.forwardMapper['sRange']]:self._sRange,
                         
+                        #self.pvRD['fullControlIndices']:fullControlIndices,  # FIXME disabled 1928tskdhslj
                         self.pvRD['sensorGoal']:self._sensorGoal,
                         self.pvRD['modifier_C']:self._modifiers['C'],
                         self.pvRD['modifier_T']:self._modifiers['T'],
@@ -415,10 +476,27 @@ class ExplorerHQ(object):
         
         #results = self.pvRD['sess'].run([self.pvRD['stepper']], feed_dict=feed_dict)[0]
         
-        for i in range(5):
-            results = self.pvRD['sess'].run([self.pvRD['stepper'], self.pvRD['V']], feed_dict=feed_dict)
+        for i in range(1):
+            results = self.pvRD['sess'].run([self.pvRD['reportGrad'], self.pvRD['crawlGrad'], self.pvRD['isolationGrad'], self.pvRD['V']], feed_dict=feed_dict)
             
-            self.explorers += results[0]
+            #the first gradient, for reporting its gradient vector
+            reportGrad = results[0]
+            #the second gradient, for crawling
+            crawlGrad = results[1]
+            #the gradient that should be subtracted from the movement to encourage isolation.
+            isolationGrad = results[2]
+            #the value of the original function
+            explorerValue = results[3]
+            
+            #TEMP have half the explorers ascend 1st and the other 2nd gradients. dkwig90101kdnfko
+            #t_numE = self.explorers.shape[0]
+            #t_half = int(t_numE/2)
+            t_half = 0
+            
+            #only step along control indices #FIXME kdngio129fgs won't have to index crawlGrad, as it should only contain control features
+            #TEMP slice half dkwig90101kdnfko
+            self.explorers[:t_half,conIndices] += crawlGrad[:t_half,conIndices] - isolationGrad[:t_half,conIndices]
+            self.explorers[t_half:,conIndices] += reportGrad[t_half:,conIndices]*50 - isolationGrad[t_half:,conIndices]
             
             if not hasattr(self, '_explorerSeries'):
                 self._explorerSeries = []
@@ -429,9 +507,43 @@ class ExplorerHQ(object):
             if not hasattr(self, '_explorerBest'):
                 self._explorerBest = []
             self._explorerSeries.append(np.copy(self.explorers))
-            self._explorerGrads.append(results[0])
-            self._explorerVals.append(results[1])
+            self._explorerGrads.append(reportGrad)
+            self._explorerVals.append(explorerValue)
             self._explorerBest.append(np.copy(self.explorers[np.argmax(self._explorerVals[-1])]))
+            
+            #TEMPS
+            if not hasattr(self, 'test_actuals'):
+                self.test_actuals = {}
+            #
+            testers = self.pvRD['sess'].run([self.test['diffs'], self.test['unSummed'], self.test['eCurve_unProd'],
+                                                self.test['distSqrd']], feed_dict=feed_dict)
+            self.test_actuals['diffs'] = testers[0]
+            self.test_actuals['unSummed'] = testers[1]
+            self.test_actuals['eCurve_unProd'] = testers[2]
+            self.test_actuals['distSqrd'] = testers[3]
+            self.test_actuals['isolationGrad'] = isolationGrad
+            #TEMPS
+            
+            #TODO now that we are using the second derivative to crawl, the explorer isolation can be more effectively used, and won't push
+            #       keep explorers on the hillsides...wait. what if we do that, keep explorers on the hillsides.....but not everything is a circle...
+            #       i dunno.
+            
+            #redrop relatively poorest performing explorer. (or many of them? maybe all below the mean?)
+            #   not the slowest crawler, but the one on the not stepest hill
+            #normalize to 1, by each other.
+            cg_tot = np.sum(np.copy(reportGrad[:t_half,conIndices]), axis=0)  # .shape == (1,numCF)
+            cg_contribution = reportGrad[:t_half,conIndices]/cg_tot  # (e,numCF)/(1,numCF) == (e,numCF)
+            #get means of normalized explorers' gradients
+            cg_means = np.mean(cg_contribution, axis=1)  # .shape == (e,)
+            if cg_means.size > 0:
+                cg_worstIndex = np.argmin(cg_means)
+                self.drop_explorer([cg_worstIndex])
+            #FIXME reading the previous gradient will be inaccurate for just dropped explorers.
+            
+            if explorerValue[t_half:].size > 0:
+                #drop three lowest.
+                rg_worstIndex = explorerValue[t_half:].argsort()[:3]#np.argmin(explorerValue[t_half:])
+                self.drop_explorer(rg_worstIndex)
         
     def update_params(self, *args, **kwargs):
         """Build parameter updating ops for forward model.
@@ -441,7 +553,7 @@ class ExplorerHQ(object):
         #evaluate the assigners so the vars get updated
         self.pvRD['sess'].run(assigners)
         
-    def update_environs_only(self, x, envIndices=None, conIndices=None):
+    def update_environs_only(self, x):
         """Update only environmental values in explorer vectors.
             This method is used when previously dictated control features may not be fully set in the spider.
                 This occurs in direct control features if those are also controlled by a human.
@@ -451,6 +563,8 @@ class ExplorerHQ(object):
             'envIndices' (environmental features indices) or 'conIndices' (control feature indices) must be defined
                 they should be array like and hold the indices of the respective feature types
         """
+        
+        #FIXME 39ndkslwo make conIndices a class attribute
         
         #NOTE: remember that explorers only move a little bit each time, but they chase maximums that move slowly as well.
         #       if their position is overwritten, then they may lose progress on the maximum they are chasing.
@@ -463,6 +577,9 @@ class ExplorerHQ(object):
         #FIXME verify that x is the right shape for explorers
         assert x.shape == self.explorers.shape[1:]
         
+        #FIXME just use attribute in this method.
+        conIndices = self._controlIndices
+        envIndices = None
         
         #create base partition array
         ePartition = np.zeros(self._xDim)
