@@ -144,6 +144,9 @@ class ExplorerHQ(object):
             #self.pvRD['sess'].run(tf.initialize_all_variables())
             self.drop_explorer(range(numExplorers))
         
+        #the best explorer of the last timestep. TEMP just use one as a placeholder for the first. #TODO calc it.
+        self._lastBest = self.explorers[0]
+        
         #build point value calculation tensors
         #   fill pvRD
         #FIXME 89991jdkdlsnhj1h1 spider brain needs to initalize this class after it's figured out its nodes.
@@ -310,7 +313,7 @@ class ExplorerHQ(object):
         
         #TODO i think this will need to be a covariance matrix, taking values only on the diagonal,
         #   but that scales with the range of the control features.
-        isolationWidth = tf.constant(100., dtype=tf.float32)
+        isolationWidth = tf.constant(0.5, dtype=tf.float32)
         
         #make a unique placeholder.
         assert self.explorers.shape[0] < 500, "Don't run the isolation gradients with over 500 explorers. You can change this limit if you want."
@@ -509,7 +512,7 @@ class ExplorerHQ(object):
             self._explorerSeries.append(np.copy(self.explorers))
             self._explorerGrads.append(reportGrad)
             self._explorerVals.append(explorerValue)
-            self._explorerBest.append(np.copy(self.explorers[np.argmax(self._explorerVals[-1])]))
+            self._explorerBest.append(self._best_explorer(explorerValue))
             
             #TEMPS
             if not hasattr(self, 'test_actuals'):
@@ -531,17 +534,17 @@ class ExplorerHQ(object):
             #redrop relatively poorest performing explorer. (or many of them? maybe all below the mean?)
             #   not the slowest crawler, but the one on the not stepest hill
             #normalize to 1, by each other.
-            cg_tot = np.sum(np.copy(reportGrad[:t_half,conIndices]), axis=0)  # .shape == (1,numCF)
-            cg_contribution = reportGrad[:t_half,conIndices]/cg_tot  # (e,numCF)/(1,numCF) == (e,numCF)
+            cg_tot = np.sum(np.copy(reportGrad[:,conIndices]), axis=0)  # .shape == (1,numCF)
+            cg_contribution = reportGrad[:,conIndices]/cg_tot  # (e,numCF)/(1,numCF) == (e,numCF)
             #get means of normalized explorers' gradients
             cg_means = np.mean(cg_contribution, axis=1)  # .shape == (e,)
-            if cg_means.size > 0:
-                cg_worstIndex = np.argmin(cg_means)
-                self.drop_explorer([cg_worstIndex])
+            #drop lowest crawler regardless.
+            cg_worstIndex = np.argmin(cg_means)
+            self.drop_explorer([cg_worstIndex])
             #FIXME reading the previous gradient will be inaccurate for just dropped explorers.
             
             if explorerValue[t_half:].size > 0:
-                #drop lowest
+                #drop lowest value
                 rg_worstIndex = np.argmin(explorerValue[t_half:])
                 self.drop_explorer([rg_worstIndex])
         
@@ -604,6 +607,47 @@ class ExplorerHQ(object):
         environs = x[ePartition]
         
         self.explorers[:,ePartition] = environs
+        
+    def _best_explorer(self, explorerValue):
+        """Returns the full x value of the best explorer.
+            TODO maybe just return the control features?
+        """
+        
+        assert explorerValue.shape == self.explorers.shape[:1]
+        
+        #TEMP use anti_oscillation weighting.
+        aoVals = self._anti_oscillation()
+        
+        #weight aoVals by the explorer vals
+        explorerValue += (aoVals*np.mean(explorerValue))
+        
+        thisBest = np.copy(self.explorers[np.argmax(explorerValue)])
+        
+        self._lastBest = thisBest
+        
+        return thisBest
+        
+    def _anti_oscillation(self):
+        """Calculates and returns the anti oscillation weighting for explorers.
+            This is a temporary quickfix to the oscillation problem that will eventually be solved instead by
+                keeping gaussian processes of time series as environmental features.
+        """
+        
+        weight = 0.1
+        
+        #a potential quick fix for remaining oscillation
+        importance = 3.
+        
+        #to broadcast over explorers.
+        lastBest_ = np.expand_dims(self._lastBest, 0)  # .shape == (1,xDim)
+        
+        diffs = np.absolute(self.explorers-lastBest_)
+        distSqrd = np.sum(np.dot(diffs, diffs.transpose()), axis=1)
+        #don't sqrt cz we want the squared value below.
+        
+        aoVals = importance*np.exp(-(distSqrd)/(weight**2.))  # .shape == (e,xDim)
+        
+        return aoVals
         
     def graph_space(self, x):
         """Takes inputs, and generates the point values for those inputs. Also evaluates ops in self.test

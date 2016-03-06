@@ -112,7 +112,7 @@ class ConveyorTest(pymunk.Space):
         
         self.expHQ = sexp.ExplorerHQ(numExplorers=20, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
                                 certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
-                                modifiers=dict(C=.01, T=.1, S=1.))
+                                modifiers=dict(C=.01, T=.05, S=1.))
         
         self.spi_brain = SpiderBrain(self.spi_spider, self.expHQ)
         #FIXME 89991jdkdlsnhj1h1 build exploration graph here for now. move to spider eventually.

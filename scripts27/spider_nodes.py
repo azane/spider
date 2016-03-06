@@ -239,6 +239,8 @@ class SpiMuscle(BaseNode):
         self.stiffness = stiffness
         self.damping = damping
         self.originalLength = restLength
+        self._lastLength = restLength
+        self._mavgPts = np.zeros((100))
         
         super(SpiMuscle, self).__init__(anchorBodies, anchorPoints, shapeGroup, numAnchors=2, **kwargs)
     
@@ -260,14 +262,20 @@ class SpiMuscle(BaseNode):
                                             rest_length=self.originalLength, stiffness=self.stiffness, damping=self.damping)
         
         #return elements, and control and environmental defaults.
-        return [self.muscle], [0], [0], []
+        return [self.muscle], [0], [0,0], []
         
     def step(self, dt):
         """Retrieve control features and update the data dictionary.
         """
+        thisLength = self._get_length()
+        deltaLength = (thisLength - self._lastLength)/dt
+        self._lastLength = thisLength
+        
+        self._mavgPts = np.roll(self._mavgPts, 1)
+        self._mavgPts[0] = deltaLength
         
         #set the environmental array to the length of the muscle.
-        self._cts_data['environmental'] = np.array([self._get_length()])
+        self._cts_data['environmental'] = np.array([thisLength, np.average(self._mavgPts)*1000])
         
         #set to the first/only value in the control array.
         #TODO gjdkd129287 should the step function/set control function scale values from a required range?
@@ -321,7 +329,7 @@ class BalanceNode(BaseNode):
         self.deltaOverDT = 0 #start slope at 0
         
         #return element list and environmental array default.
-        return [self.segBody, segShape, segJoint], [], [0], []
+        return [self.segBody, segShape, segJoint], [], [0,0], []
     
     def step(self, dt):
         current = self._get_balance()
@@ -330,7 +338,7 @@ class BalanceNode(BaseNode):
         
         self.last = current
         
-        self._cts_data['environmental'] = np.array([current])#, self.deltaOverDT])
+        self._cts_data['environmental'] = np.array([current, self.deltaOverDT*1000])
 
 
 def node_dict():
