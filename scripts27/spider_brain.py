@@ -1,18 +1,18 @@
 import numpy as np
 import os as os
+import sys as sys
+
+sys.path.append('/Users/azane/GitRepo/spider/scripts27/gauss_mix/')
+import gmix_model as gmm
+import spider_solution_explorers as sexp
 
 class SpiderBrain(object):
-    def __init__(self, physiology, explorerHQ):
+    def __init__(self, physiology):
         super(SpiderBrain, self).__init__()
         
         #a SpiderPhysiology object passed in from the world so the brain can access it's body.
         self.physiology = physiology
         self.allNodes = self.physiology.nodes
-        
-        #an initialized ExplorersHQ object
-        #TODO maybe have this class take care of initializing this eventually,
-        #       but the init is messy atm, so just pass it in for now.
-        self.explorerHQ = explorerHQ
         
         #----<Data Recording Values>----
         #the max amount of experiential points to keep stored. once this value exceeded, the oldest data will be discarded.
@@ -41,6 +41,34 @@ class SpiderBrain(object):
         #       4. self.y_data
         #       5. self._controlIndices
         self.__define_series()
+        
+        
+        #TEMP the below inits are temporary, to be made more modular in the future.
+        
+        #init the trainer after the nodes are processed and the series shapes are defined.
+        #TODO make the class and arguments more flexible, passable from outside.
+        #TEMP don't differentiate between actual and test data for now.
+        #NOTE these are currently full of nans, and are only passed so the shape is defined.
+        
+        #FIXME 19jti903jdk as the spider is using empty data, the ranges will need to be predefined here...        
+        self.expModel = gmm.GaussianMixtureModel(self.x_data, self.y_data, self.x_data, self.y_data,
+                                                numGaussianComponents=20, hiddenLayerSize=25, learningRate=1e-3,
+                                                buildGraph=True, debug=False)
+        forwardRD = self.expModel.spi_get_forward_model()
+        
+        #init the explorers
+        self.explorerHQ = sexp.ExplorerHQ(numExplorers=20, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
+                                certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
+                                modifiers=dict(C=.01, T=.05, S=1.), controlIndices=self._controlIndices)
+        
+        #load saved parameters.
+        try:
+            #TODO this should obviously be a class attribute, loaded by the world that should take care of saving/loading the state of things..
+            params = np.load("data/spi_gmm_wb.npz")
+            self.explorerHQ.update_params(**params)
+        except IOError:
+            #if the file doesn't exist, just ignore this.
+            pass
         
         
     def __define_series(self):
@@ -78,7 +106,6 @@ class SpiderBrain(object):
         controlIndices.append(xWidth)
         
         self._controlIndices = np.array(controlIndices)
-        self.explorerHQ.update_controlIndices(self._controlIndices)
         
         #Use np.zeros, defaulting to float dtype, so in-place modification can occur.
         #create empty time series arrays using the specified series size, and inferred widths.
@@ -174,7 +201,7 @@ class SpiderBrain(object):
         self.y_data[0:self.lookBack] = np.expand_dims(self.y_timeSeries[0], 0)
     
     def _act(self):
-        """Integrates the explorersHQ
+        """Integrates the explorerHQ
         """
         #FIXME TODO FIXME TODO this method is currently in a pre-alpha state, and is currently implemented for testing purposes.
         
@@ -196,6 +223,43 @@ class SpiderBrain(object):
         self.explorerHQ.step_explorer()
         
         #TODO get the explorer control feature location, and set the node control features to those values.
+        
+    def train(self):
+        """Launches a training session in another thread, then updates the forward parameters.
+        """
+        #TODO launch a connected web server
+        
+        #TODO multithread this. maybe return a queuable operation? so the world can handle the threading?
+        
+        self.expModel.update_data(x=self.x_data, t=self.y_data)
+        #FIXME 19jti903jdk the spider needs to update the ranges of the data as things are experienced...but this requires a retraining of the network.
+        #                   though, not entirely, as expanding the range should make it proportional, so something probably can be done to modify the 
+        #                   parameters appropriately, and analytically.
+        self.expModel.inRange, self.expModel.outRange = self.expModel._infer_ranges(x=self.x_data, t=self.y_data)
+        
+        #this will need to use another tf session for training? or not because the explorersHQ already uses a different session?
+        self.expModel.train(iterations=30)
+        
+        #TEMP 19jti903jdk
+        testos = self.expModel.get_evals(['fetchX', 'fetchT', 'eRInB', 'eRInT'], useData='train')
+        print "----------------fetches on train----------------"
+        print testos
+        print "----------------"
+        #/TEMP
+        
+        evalStrs = ['w1', 'w2', 'w3', 'b1', 'b2', 'b3']
+        
+        params = self.expModel.get_evals(evalStrs)
+        
+        #TEMP 19jti903jdk
+        print "----------------params----------------"
+        print params
+        print "----------------"
+        #/TEMP
+        
+        self.explorerHQ.update_params(**params)
+        
+        return params
         
     def data_to_npz(self, dest):
         """Writes an npz file holding data

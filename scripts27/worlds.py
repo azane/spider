@@ -103,28 +103,12 @@ class ConveyorTest(pymunk.Space):
         
         l.extend(self.spi_spider.draw_these()) #pass draw
         
-        #---<temp>---
-        s_x, s_t = gmm.get_xt_from_npz("data/spi_data.npz")
-        t_x, t_t = gmm.get_xt_from_npz("data/spi_data.npz")
-        
-        self.expModel = gmm.GaussianMixtureModel(s_x, s_t, t_x, t_t, numGaussianComponents=20, hiddenLayerSize=25, learningRate=1e-3, buildGraph=False, debug=False)
-        forwardRD = self.expModel.spi_get_forward_model()
-        
-        self.expHQ = sexp.ExplorerHQ(numExplorers=20, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
-                                certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
-                                modifiers=dict(C=.01, T=.05, S=1.))
-        
-        self.spi_brain = SpiderBrain(self.spi_spider, self.expHQ)
-        #FIXME 89991jdkdlsnhj1h1 build exploration graph here for now. move to spider eventually.
-        self.expHQ._build_solution_space()
-        
-        params = np.load("data/spi_gmm_wb.npz")
-        self.expHQ.update_params(w1=params['w1'], w2=params['w2'], w3=params['w3'], b1=params['b1'], b2=params['b2'], b3=params['b3'])
-        
-        #---</temp>---
+        self.spi_brain = SpiderBrain(self.spi_spider)
         
         return l
-        
+    def spi_train(self):
+        pass
+    
     def spi_control(self):
         #TEMP this is not how control should be implemented...it's temporary, for data collection and evaluation, until a better framework is developed.
         #TODO that framework should go through the spider_brain first.
@@ -166,9 +150,13 @@ class ConveyorTest(pymunk.Space):
                     #self.spi_brain.series_to_csv(dest="data/foo.csv",columns=[0,1])
                     self.spi_brain.data_to_npz(dest="data/spi_data.npz")
             
+            if self.spi_keys[key.T]:
+                params = self.spi_brain.train()
+                #np.savez('data/spi_gmm_wb.npz', **params)
+            
         else:
             #FIXME TODO have the brain implement this control when the exploration model is stored there.
-            if hasattr(self.expHQ, '_explorerVals'):
-                bestExplorer = np.copy(self.expHQ.explorers[np.argmax(self.expHQ._explorerVals[-1])])
+            if hasattr(self.spi_brain.explorerHQ, '_explorerVals'):
+                bestExplorer = np.copy(self.spi_brain.explorerHQ.explorers[np.argmax(self.spi_brain.explorerHQ._explorerVals[-1])])
                 m2.set_control_features([bestExplorer[0]])
             

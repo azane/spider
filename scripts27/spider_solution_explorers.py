@@ -138,10 +138,7 @@ class ExplorerHQ(object):
         
         #create and drop explorers in the space
         with self.forwardRD[self.forwardMapper['graph']].as_default():
-            #self.pvRD['sess'] = tf.Session()
-            #self.explorers = tf.Variable(tf.zeros([numExplorers, self._xDim]))
             self.explorers = np.zeros([numExplorers, self._xDim])
-            #self.pvRD['sess'].run(tf.initialize_all_variables())
             self.drop_explorer(range(numExplorers))
         
         #the best explorer of the last timestep. TEMP just use one as a placeholder for the first. #TODO calc it.
@@ -149,9 +146,7 @@ class ExplorerHQ(object):
         
         #build point value calculation tensors
         #   fill pvRD
-        #FIXME 89991jdkdlsnhj1h1 spider brain needs to initalize this class after it's figured out its nodes.
-        #       for now, worlds is doing it, but that means this has to be called after spider has initialized and this class has.
-        #self._build_solution_space()
+        self._build_solution_space()  #fixed: 89991jdkdlsnhj1h1
         #---</Build TF Graph>---
     
     def update_controlIndices(self, controlIndices):

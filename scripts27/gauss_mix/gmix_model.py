@@ -130,7 +130,8 @@ def tf_grad_u(m, v, u, t):
 #----<Range Normalization Functions>-----
 #TODO FIXME these are basically the same functions, cut two, or give a convenience function to get the midpoint of rBot/rTop
 def to_zeroToOne(vals, rBot, rTop):
-    return (vals-rBot)/(rTop-rBot)
+    #add a bit to prevent /0. #FIXME fjdiu19dih the incoming range needs to be large enough that 1e-10 is effectively nothing.
+    return (vals-rBot)/(rTop-rBot+1e-10)
 def from_zeroToOne(vals, rBot, rTop):
     return (vals*(rTop-rBot))+rBot
 def to_one_from_range(vals, rangeCenter=0., rangeSize=2.):
@@ -138,7 +139,8 @@ def to_one_from_range(vals, rangeCenter=0., rangeSize=2.):
         Calling this with float values is quite important."""
     vals -= rangeCenter  # center 0
     vals += rangeSize/2  # bottom 0
-    vals /= rangeSize  # scale to 1
+    #add a bit to prevent /0. #FIXME fjdiu19dih the incoming range needs to be large enough that 1e-10 is effectively nothing.
+    vals /= rangeSize+1e-10  # scale to 1
     
     return vals
     
@@ -223,8 +225,11 @@ class GaussianMixtureModel(object):
             if outDims is None:
                 self.outDims = self._infer_space(x, t)[1]
                 
-            #NOTE the range can, and often is, inferred from the data, but the user of this class needs the flexibility
+            #NOTE the range can be, and often is, inferred from the data, but the user of this class needs the flexibility
             #       to define ranges not fully represented by the data.
+            #FIXME 19jti903jdk aha! when nan data is passed in by the spider, the inferred ranges are also nan, which means that all computations
+            #                   will be nans. unfortunately, updating these ranges requires the spider to retrain the model entirely, as the inputs
+            #                   are calculated by the ranges first...sooooo...ya. we need to fix that.
             if inRange is None:
                 self.inRange = self._infer_ranges(x, t)[0]
             if outRange is None:
@@ -445,8 +450,8 @@ class GaussianMixtureModel(object):
         outRange = tf.placeholder("float", shape=[outDims,2], name="outRange")
         
         # get and convert range matrices for massaging
-        eRInB, eRInT = self._shape_range_for_elementwise(self.inRange, rank=2)
-        eROutB, eROutT= self._shape_range_for_elementwise(self.outRange, rank=3)
+        eRInB, eRInT = self._shape_range_for_elementwise(inRange, rank=2)
+        eROutB, eROutT= self._shape_range_for_elementwise(outRange, rank=3)
         
         #summary ops
         #x_hist = tf.histogram_summary("x", fullIn)
@@ -560,6 +565,11 @@ class GaussianMixtureModel(object):
         rd['b2']=b2
         rd['b3']=b3
         rd['hiddenLayerSize']=tf.constant(hiddenLayerSize)
+        
+        #TEMP 19jti903jdk
+        rd['eRInB']=eRInB
+        rd['eRInT']=eRInT
+        #/TEMP
         #-----</Update Reference Dict>-----
         
         
@@ -627,6 +637,7 @@ class GaussianMixtureModel(object):
         inDims = self.inDims
         outDims = self.outDims
         rd = self.refDict
+        #FIXME why have the learning rate passable?
         if learningRate is None:
             learningRate = self.learningRate
         #-----</Argument Processing>-----
@@ -650,6 +661,11 @@ class GaussianMixtureModel(object):
             #custom train step applies the calculated and aggregated gradients.
             #   to modify the construction of these gradients,
             #    see modify self._calc_wb_gradients_from_tf_activations
+            #TODO make learningRate a tensor so it can be changed on the fly.
+            
+            #TEMP 19jti903jdk
+            print "self.learningRate: " + str(self.learningRate)
+            
             custom_train_step = [
                                     rd['b1'].assign_sub(rd['calc_agg_grad_b1'] * self.learningRate),
                                     rd['b2'].assign_sub(rd['calc_agg_grad_b2'] * self.learningRate),
@@ -712,7 +728,7 @@ class GaussianMixtureModel(object):
         """Return the reference dictionary holding tensorflow tensors.
         """
         return self.refDict
-    def get_evals(self, evalStrs):
+    def get_evals(self, evalStrs, useData=None):
         """Return a dictionary of evaluated tensors with evalStr as keys.
             'evalStr' contains a list of strings that act as the reference dictionary keys for the tensors to evaluate.
         """
@@ -722,13 +738,30 @@ class GaussianMixtureModel(object):
             #TODO add a 'size' argument that defines the size of the test inputs
             #TODO allow the user to use their own feed dict? or at least certain parts
             feed_dict = {
-                            self.refDict['x']:self.x_test,
-                            self.refDict['t']:self.t_test,
                             self.refDict['inRange']:self.inRange,
                             self.refDict['outRange']:self.outRange
                         }
+                        
+            if useData is None:
+                #don't set it if the evals don't depend on input.
+                pass
+            elif useData == 'test':
+                feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self.x_test, self.t_test
+            elif useData == 'train':
+                feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self.x, self.t
+                
+                #TEMP 19jti903jdk
+                print "---------------------feeds on eval, x/t---------------------------"
+                print feed_dict[self.refDict['x']], feed_dict[self.refDict['t']]
+                print "------------------------------------------------"
+                #NOTE 19jti903jdk: the feeds are set to the correct stuff, but the evaluation is returning nans on the fetches.
+                #                   i'm guessing the session, or graph being used is incorrect.
+                #/TEMP
+            else:
+                raise ValueError("'" + str(useData) + "' is not valid for useData.")
             
-            #convert list of strings to values from refDict.
+            
+            #convert list of strings to tensors from refDict.
             evals = [self.refDict[k] for k in evalStrs]
             
             result = self.refDict['sess'].run(evals, feed_dict=feed_dict)
@@ -1086,6 +1119,23 @@ class GaussianMixtureModel(object):
         
         self.refDict['2d_tdb_nodes'] = nodeList
     
+    def update_data(self, x, t):
+        """Update the training data.
+        """
+        #TODO check for shape consistency. etc. etc.
+        
+        #remove nans
+        #hstack negated isnan checks
+        b = ~(np.hstack((np.isnan(x), np.isnan(t))))
+        #get rows where all columns are True (not nan)
+        b = b.all(axis=1)
+        
+        self.x = x[b]
+        self.t = t[b]
+        
+        #print self.x
+        #print self.t
+        
     def train(self, iterations=1000, testBatchSize=500, trainBatchSize=1000, reportEvery=10):
         
         assert self.__graphBuilt, "Graph not built. Build graph."
@@ -1102,11 +1152,14 @@ class GaussianMixtureModel(object):
                             self.refDict['outRange']:self.outRange
                         }
             
-            result = None #final result for notebook testing.
+            #TEMP 19jti903jdk
+            printed = False
+            #/TEMP
+            
             #----<Training Loop>----
             for i in iterations:
             
-                if ((i+1) % reportEvery == 0): #run reports every reportEvery iterations.
+                if self.__debug and ((i+1) % reportEvery == 0): #run reports every reportEvery iterations.
                     
                     #update feed_dict with test batch
                     feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x_test, self.t_test, testBatchSize)
@@ -1130,13 +1183,22 @@ class GaussianMixtureModel(object):
                     #update feed_dict with training batch
                     feed_dict[self.refDict['x']], feed_dict[self.refDict['t']] = self._sample_batch(self.x, self.t, trainBatchSize)
                     #custom train step is a list itself, the returned value is a list of variable values after the training.
-                    self.refDict['sess'].run(self.refDict['custom_train_step'], feed_dict=feed_dict)
+                    #self.refDict['sess'].run(self.refDict['custom_train_step'], feed_dict=feed_dict)
+                    
+                    #TEMP 19jti903jdk
+                    results = self.refDict['sess'].run(self.refDict['custom_train_step'], feed_dict=feed_dict)
+                    if not printed:
+                        print "--------------------------custom train step results, first----------------------"
+                        print results
+                        printed = True
+                    #TEMP
+                    
             #----<Training Loop>----
             
     def get_xmvu(self):
         #TODO rename to get_mvu, not xmvu.
         keys = ['m', 'v', 'u']
-        mvu = self.get_evals(keys)
+        mvu = self.get_evals(keys, useData='test') #TODO just deprecate this method.
         return mvu['m'], mvu['v'], mvu['u']
     
     def get_write_xmvu(self, path):
