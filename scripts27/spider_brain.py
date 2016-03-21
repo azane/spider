@@ -57,6 +57,7 @@ class SpiderBrain(object):
         forwardRD = self.expModel.spi_get_forward_model()
         
         #init the explorers
+        self._sensorGoal = np.array([-.22])
         self.explorerHQ = sexp.ExplorerHQ(numExplorers=20, xRange=self.expModel.inRange, sRange=self.expModel.outRange, forwardRD=forwardRD,
                                 certainty_func=sexp.gmm_bigI, expectation_func=sexp.gmm_expectation, parameter_update_func=sexp.gmm_p_updater,
                                 modifiers=dict(C=.01, T=.05, S=1.), controlIndices=self._controlIndices)
@@ -211,7 +212,7 @@ class SpiderBrain(object):
         #       this will need to ultimately come from outside, UI or genetics (physiology).
         #       and trickle down to dependent explorerHQs
         #update the sensor goal
-        self.explorerHQ.update_sensorGoal(np.array([-0.22]))
+        self.explorerHQ.update_sensorGoal(self._sensorGoal)
         
         #update environ info
         # retrieve the most current situation, but add a filler dimension on the end for the time axis.
@@ -236,6 +237,7 @@ class SpiderBrain(object):
         #                   though, not entirely, as expanding the range should make it proportional, so something probably can be done to modify the 
         #                   parameters appropriately, and analytically.
         self.expModel.inRange, self.expModel.outRange = self.expModel._infer_ranges(x=self.x_data, t=self.y_data)
+        self.explorerHQ._xRange, self.explorerHQ._sRange = self.expModel.inRange, self.expModel.outRange
         
         #this will need to use another tf session for training? or not because the explorersHQ already uses a different session?
         self.expModel.train(iterations=30)

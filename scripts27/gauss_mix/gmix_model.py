@@ -317,7 +317,10 @@ class GaussianMixtureModel(object):
             outRange.append([t[:,d].min(), t[:,d].max()])
         #----</Infer Ranges>----
         
-        return np.array(inRange, dtype=np.float32), np.array(outRange, dtype=np.float32)  # convert from list
+        inR, outR = np.array(inRange, dtype=np.float32), np.array(outRange, dtype=np.float32)  # convert from list
+        inR, outR = np.nan_to_num(inR), np.nan_to_num(outR)
+        
+        return inR, outR
         
     def _expand_mvut(self, m, v, u, t):
         """Return the expanded m, v, u, and t for broadcasting together.

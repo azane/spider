@@ -205,6 +205,8 @@ class ExplorerHQ(object):
         #use the sRange placeholder from the forward RD.
         absRange = tf.reduce_sum(self.forwardRD[self.forwardMapper['sRange']]*np.array([[-1,1]]), reduction_indices=1)  # .shape == (sDim)
         absRange = tf.expand_dims(absRange, 0)  # .shape == (1,sDim) # for broadcasting over e.
+        #FIXME this requires that 1e-10 is infinitesmal in comparison
+        absRange += 1e-10
         
         #divide the std by the absRange, i.e. return the ratio of the range relevantly covered by the p(x)
         certainty = std/absRange
@@ -272,6 +274,8 @@ class ExplorerHQ(object):
         num = tf.square(self.pvRD['sensorGoal'] - s)  # .shape == (e, sDim)
         #the difference between the top and the bottom, squared
         den = tf.square(tf.reduce_sum(self.forwardRD[self.forwardMapper['sRange']]*np.array([[-1.,1.]], dtype=np.float32), reduction_indices=1))  # .shape == (sDim)
+        #FIXME to solve div by zero problems, this requires that 1e10 is infinitesmal.
+        den += 1e-10
         den = tf.expand_dims(den, 0)  # .shape == (1,sDim) # for broadcasting over e.
         
         self.test['errDen'] = den
@@ -310,7 +314,7 @@ class ExplorerHQ(object):
         #   but that scales with the range of the control features.
         isolationWidth = tf.constant(0.5, dtype=tf.float32)
         
-        #make a unique placeholder.
+        #TODO make a unique placeholder.
         assert self.explorers.shape[0] < 500, "Don't run the isolation gradients with over 500 explorers. You can change this limit if you want."
         self.pvRD['explorers_for_isolation'] = tf.placeholder(tf.float32, shape=[self.explorers.shape[0], self._xDim])  # .shape == (e,xDim)
         X_r = tf.expand_dims(self.pvRD['explorers_for_isolation'], 0)  # .shape == (1,e,xDim)
@@ -398,6 +402,10 @@ class ExplorerHQ(object):
             self.explorers.assign (tf.Variable.assign) is used to assign a new array to the explorers.
         """
         
+        #FIXME only redrop on control features.
+        #       ...is this causing other problems? getting data recorded incorrectly on freshly dropped explorers?
+        #       it would only be problematic if the assessment is made before the environs get overwritten.
+        
         #get current explorer positions
         #npExplorers = self.explorers.eval(session=self.pvRD['sess'])
         npExplorers = self.explorers
@@ -413,6 +421,10 @@ class ExplorerHQ(object):
         #reassign positions to tf variable.
         #self.explorers.assign(npExplorers)
         self.explorers = npExplorers
+        
+        print "----------------dropped explorers-------------------"
+        print self.explorers
+        print "----------------/dropped explorers-------------------"
         
     def _build_explorer_stepper(self):
         """Returns a tensor that calculates the gradient of the point value and steps the explorers uphill.
@@ -457,6 +469,8 @@ class ExplorerHQ(object):
         #print
         #end disabled 1928tskdhslj
         
+        print "sensorGoal:" + str(self._sensorGoal)
+        
         feed_dict = {
                         
                         self.forwardRD[self.forwardMapper['x']]:self.explorers,
@@ -493,6 +507,12 @@ class ExplorerHQ(object):
             
             #only step along control indices #FIXME kdngio129fgs won't have to index crawlGrad, as it should only contain control features
             #TEMP slice half dkwig90101kdnfko
+            print "--------------crawlGrad-------------"
+            print crawlGrad
+            print "--------------//crawlGrad-------------"
+            print "--------------isolationGrad-------------"
+            print isolationGrad
+            print "--------------//isolationGrad-------------"
             self.explorers[:t_half,conIndices] += crawlGrad[:t_half,conIndices] - isolationGrad[:t_half,conIndices]
             self.explorers[t_half:,conIndices] += reportGrad[t_half:,conIndices]*50 - isolationGrad[t_half:,conIndices]
             
