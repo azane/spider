@@ -179,27 +179,36 @@ class SpiderBrain(object):
     def _generate_data_over_time(self):
         """Updates x_data and y_data, pairing points over the time axis.
             
-            After discarding old data, sets x data to both series,
-                and sets y data to the current y value for all the new x points,
+            Overwrites random points with new points,
+                setting y data to the current y value for all the new x points,
                 effectively casting sensor data over control and environmental data.
         """
+        
+        #TODO roll until the data store is full.
         #---<Prep data store>---
         #shift out old data, and turn the first lookBack rows into 1s
-        self.x_data = self._shift(self.x_data, shift=self.lookBack)
-        self.y_data = self._shift(self.y_data, shift=self.lookBack)
+        #self.x_data = self._shift(self.x_data, shift=self.lookBack)
+        #self.y_data = self._shift(self.y_data, shift=self.lookBack)
         #---</Prep data store>---
         
-        #collect widths
+        #---<Get Replacement Rows>---
+        #replace the first lookback rows.
+        #replaceRows = np.arange(self.lookBack)
+        
+        #uniformly, randomly apply new points.
+        replaceRows = np.random.randint(self.dataSize, size=self.lookBack)
+        #---<Get Replacement Rows>---
+        
         xWidth = self.x_timeSeries.shape[1]
         yWidth = self.y_timeSeries.shape[1]
         
-        #assign the timeSeries array to the first lookBack rows of data, and to the xWidth column.
-        self.x_data[0:self.lookBack,0:xWidth] = self.x_timeSeries  # assign x vals
-        self.x_data[0:self.lookBack,xWidth:xWidth+1] = self.lookBackColumn # assign time axis vals
+        #assign the timeSeries array to replaceRows, and to the xWidth column.
+        self.x_data[replaceRows,0:xWidth] = self.x_timeSeries  # assign x vals
+        self.x_data[replaceRows,xWidth:xWidth+1] = self.lookBackColumn # assign time axis vals
         
-        #assign the first lookBack rows of y_data to the most recent value in the y series.
+        #assign the replaceRows of y_data to the most recent value in the y series.
         #   this requires adding a dimension to broadcast over the 1s
-        self.y_data[0:self.lookBack] = np.expand_dims(self.y_timeSeries[0], 0)
+        self.y_data[replaceRows] = np.expand_dims(self.y_timeSeries[0], 0)
     
     def _act(self):
         """Integrates the explorerHQ
@@ -243,10 +252,10 @@ class SpiderBrain(object):
         self.expModel.train(iterations=30)
         
         #TEMP 19jti903jdk
-        testos = self.expModel.get_evals(['fetchX', 'fetchT', 'eRInB', 'eRInT'], useData='train')
-        print "----------------fetches on train----------------"
-        print testos
-        print "----------------"
+        #testos = self.expModel.get_evals(['fetchX', 'fetchT', 'eRInB', 'eRInT'], useData='train')
+        #print "----------------fetches on train----------------"
+        #print testos
+        #print "----------------"
         #/TEMP
         
         evalStrs = ['w1', 'w2', 'w3', 'b1', 'b2', 'b3']
@@ -254,9 +263,9 @@ class SpiderBrain(object):
         params = self.expModel.get_evals(evalStrs)
         
         #TEMP 19jti903jdk
-        print "----------------params----------------"
-        print params
-        print "----------------"
+        #print "----------------params----------------"
+        #print params
+        #print "----------------"
         #/TEMP
         
         self.explorerHQ.update_params(**params)
